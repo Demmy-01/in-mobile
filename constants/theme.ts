@@ -1,53 +1,128 @@
-/**
- * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
- * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
- */
-
-import { Platform } from 'react-native';
-
-const tintColorLight = '#0a7ea4';
-const tintColorDark = '#fff';
-
-export const Colors = {
-  light: {
-    text: '#11181C',
-    background: '#fff',
-    tint: tintColorLight,
-    icon: '#687076',
-    tabIconDefault: '#687076',
-    tabIconSelected: tintColorLight,
+export const Typography = {
+  // Fraunces — display only
+  display: {
+    fontFamily: 'Fraunces_900Black',
+    fontSize: 36,
+    lineHeight: 44,
+    letterSpacing: -0.5,
   },
-  dark: {
-    text: '#ECEDEE',
-    background: '#151718',
-    tint: tintColorDark,
-    icon: '#9BA1A6',
-    tabIconDefault: '#9BA1A6',
-    tabIconSelected: tintColorDark,
+  displayLg: {
+    fontFamily: 'Fraunces_900Black',
+    fontSize: 40,
+    lineHeight: 48,
+    letterSpacing: -1,
+  },
+  displaySm: {
+    fontFamily: 'Fraunces_700Bold',
+    fontSize: 32,
+    lineHeight: 40,
+    letterSpacing: -0.5,
+  },
+
+  // DM Sans — all other text
+  h1: {
+    fontFamily: 'DMSans_600SemiBold',
+    fontSize: 24,
+    lineHeight: 32,
+    letterSpacing: -0.3,
+  },
+  h2: {
+    fontFamily: 'DMSans_600SemiBold',
+    fontSize: 20,
+    lineHeight: 28,
+    letterSpacing: -0.2,
+  },
+  h3: {
+    fontFamily: 'DMSans_600SemiBold',
+    fontSize: 18,
+    lineHeight: 26,
+  },
+  bodyLg: {
+    fontFamily: 'DMSans_400Regular',
+    fontSize: 16,
+    lineHeight: 24,
+  },
+  body: {
+    fontFamily: 'DMSans_400Regular',
+    fontSize: 14,
+    lineHeight: 22,
+  },
+  bodyMedium: {
+    fontFamily: 'DMSans_500Medium',
+    fontSize: 14,
+    lineHeight: 22,
+  },
+  bodySemiBold: {
+    fontFamily: 'DMSans_600SemiBold',
+    fontSize: 14,
+    lineHeight: 22,
+  },
+  label: {
+    fontFamily: 'DMSans_500Medium',
+    fontSize: 12,
+    lineHeight: 18,
+    letterSpacing: 0.1,
+  },
+  labelSemiBold: {
+    fontFamily: 'DMSans_600SemiBold',
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  micro: {
+    fontFamily: 'DMSans_400Regular',
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  button: {
+    fontFamily: 'DMSans_600SemiBold',
+    fontSize: 15,
+    lineHeight: 22,
+    letterSpacing: 0.1,
+  },
+  buttonSm: {
+    fontFamily: 'DMSans_600SemiBold',
+    fontSize: 13,
+    lineHeight: 18,
   },
 };
 
-export const Fonts = Platform.select({
-  ios: {
-    /** iOS `UIFontDescriptorSystemDesignDefault` */
-    sans: 'system-ui',
-    /** iOS `UIFontDescriptorSystemDesignSerif` */
-    serif: 'ui-serif',
-    /** iOS `UIFontDescriptorSystemDesignRounded` */
-    rounded: 'ui-rounded',
-    /** iOS `UIFontDescriptorSystemDesignMonospaced` */
-    mono: 'ui-monospace',
+export const Spacing = {
+  xs: 4,
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 20,
+  xxl: 24,
+  xxxl: 32,
+  section: 40,
+};
+
+export const Radii = {
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 20,
+  xxl: 24,
+  full: 50,
+  card: 16,
+  button: 12,
+  chip: 50,
+};
+
+export const Shadows = {
+  // Only use on floating elements
+  float: {
+    shadowColor: '#0D1B2A',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.12,
+    shadowRadius: 24,
+    elevation: 8,
   },
-  default: {
-    sans: 'normal',
-    serif: 'serif',
-    rounded: 'normal',
-    mono: 'monospace',
+  card: {
+    shadowColor: '#0D1B2A',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 2,
   },
-  web: {
-    sans: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
-    serif: "Georgia, 'Times New Roman', serif",
-    rounded: "'SF Pro Rounded', 'Hiragino Maru Gothic ProN', Meiryo, 'MS PGothic', sans-serif",
-    mono: "SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
-  },
-});
+};
