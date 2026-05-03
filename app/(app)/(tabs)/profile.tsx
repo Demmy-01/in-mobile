@@ -135,7 +135,7 @@ export default function ProfileScreen() {
             <View style={styles.emptyTab}>
               <Text style={styles.emptyIcon}>📄</Text>
               <Text style={styles.emptyTitle}>No CVs generated yet</Text>
-              <TouchableOpacity style={styles.buildCvBtn} onPress={() => router.push('/cv-builder' as never)}>
+              <TouchableOpacity style={styles.buildCvBtn} onPress={() => router.push('/(app)/(tabs)/cv-builder')}>
                 <Text style={styles.buildCvBtnText}>Build Your First CV →</Text>
               </TouchableOpacity>
             </View>

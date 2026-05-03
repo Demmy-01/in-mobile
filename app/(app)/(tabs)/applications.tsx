@@ -5,6 +5,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/Colors';
 import { Typography, Radii } from '@/constants/theme';
+import { Inbox, ChevronUp, ChevronDown } from 'lucide-react-native';
 
 type AppStatus = 'All' | 'Pending' | 'Reviewed' | 'Accepted' | 'Rejected';
 
@@ -62,19 +63,21 @@ export default function ApplicationsScreen() {
       </View>
 
       {/* Tabs */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabRow}>
-        {TABS.map((tab) => (
-          <TouchableOpacity
-            key={tab}
-            style={[styles.tabChip, activeTab === tab && styles.tabChipActive]}
-            onPress={() => setActiveTab(tab)}
-          >
-            <Text style={[styles.tabChipText, activeTab === tab && styles.tabChipTextActive]}>
-              {tab}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+      <View style={styles.tabsWrapper}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabRow}>
+          {TABS.map((tab) => (
+            <TouchableOpacity
+              key={tab}
+              style={[styles.tabChip, activeTab === tab && styles.tabChipActive]}
+              onPress={() => setActiveTab(tab)}
+            >
+              <Text style={[styles.tabChipText, activeTab === tab && styles.tabChipTextActive]}>
+                {tab}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
 
       {/* Application List */}
       <FlatList
@@ -84,7 +87,7 @@ export default function ApplicationsScreen() {
         showsVerticalScrollIndicator={false}
         ListEmptyComponent={
           <View style={styles.emptyState}>
-            <Text style={styles.emptyIcon}>📭</Text>
+            <Inbox size={56} color={Colors.light.textMuted} />
             <Text style={styles.emptyTitle}>No applications yet</Text>
             <Text style={styles.emptyText}>Applications in this category will appear here.</Text>
           </View>
@@ -128,7 +131,13 @@ export default function ApplicationsScreen() {
               )}
 
               <View style={styles.expandHint}>
-                <Text style={styles.expandHintText}>{isExpanded ? '▲ Hide' : '▼ View timeline'}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  {isExpanded
+                    ? <ChevronUp size={14} color={Colors.light.textMuted} />
+                    : <ChevronDown size={14} color={Colors.light.textMuted} />
+                  }
+                  <Text style={styles.expandHintText}>{isExpanded ? 'Hide' : 'View timeline'}</Text>
+                </View>
               </View>
             </TouchableOpacity>
           );
@@ -146,7 +155,8 @@ const styles = StyleSheet.create({
   },
   headerTitle: { fontFamily: 'DMSans_700Bold', fontSize: 22, color: Colors.light.textDark },
   headerSub: { ...Typography.label, color: Colors.light.textMuted, marginTop: 2 },
-  tabRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 20, paddingVertical: 14 },
+  tabsWrapper: { paddingVertical: 14 },
+  tabRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 20, alignItems: 'center' },
   tabChip: {
     paddingHorizontal: 16, paddingVertical: 7, borderRadius: 50,
     backgroundColor: Colors.light.surfaceGrey, borderWidth: 1, borderColor: Colors.light.border,
@@ -179,7 +189,6 @@ const styles = StyleSheet.create({
   expandHint: { marginTop: 12, alignItems: 'center' },
   expandHintText: { ...Typography.micro, color: Colors.light.textMuted },
   emptyState: { alignItems: 'center', paddingTop: 80, gap: 12 },
-  emptyIcon: { fontSize: 56 },
   emptyTitle: { fontFamily: 'Fraunces_700Bold', fontSize: 22, color: Colors.light.textDark },
   emptyText: { ...Typography.body, color: Colors.light.textMuted, textAlign: 'center' },
 });

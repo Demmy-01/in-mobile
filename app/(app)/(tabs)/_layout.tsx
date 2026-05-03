@@ -1,24 +1,81 @@
 import { Tabs } from 'expo-router';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, StyleSheet, Platform, Animated } from 'react-native';
 import { Colors } from '@/constants/Colors';
-import { Typography } from '@/constants/theme';
+import { Home, Search, ClipboardList, PenLine, User } from 'lucide-react-native';
 
 type TabIconProps = {
-  label: string;
-  icon: string;
   focused: boolean;
+  IconComponent: any;
 };
 
-function TabIcon({ label, icon, focused }: TabIconProps) {
+import { useEffect, useRef } from 'react';
+
+function TabIcon({ focused, IconComponent }: TabIconProps) {
+  const animValue = useRef(new Animated.Value(focused ? 1 : 0)).current;
+
+  useEffect(() => {
+    Animated.spring(animValue, {
+      toValue: focused ? 1 : 0,
+      useNativeDriver: true,
+      friction: 6,
+      tension: 100,
+    }).start();
+  }, [focused]);
+
+  const inactiveOpacity = animValue.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, 0],
+  });
+
+  const inactiveTranslateY = animValue.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 16],
+  });
+
+  const activeOpacity = animValue.interpolate({
+    inputRange: [0, 0.4, 1],
+    outputRange: [0, 1, 1],
+  });
+
+  const activeTranslateY = animValue.interpolate({
+    inputRange: [0, 1],
+    outputRange: [16, -24],
+  });
+
+  const activeScale = animValue.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.6, 1],
+  });
+
   return (
-    <View style={styles.tabItem}>
-      <Text style={[styles.tabIcon, { opacity: focused ? 1 : 0.5 }]}>{icon}</Text>
-      <Text style={[
-        styles.tabLabel,
-        { color: focused ? Colors.light.accentBlue : Colors.light.tabInactive }
-      ]}>
-        {label}
-      </Text>
+    <View style={styles.iconWrapper}>
+      {/* Inactive State */}
+      <Animated.View
+        style={[
+          styles.inactiveContainer,
+          {
+            opacity: inactiveOpacity,
+            transform: [{ translateY: inactiveTranslateY }],
+          },
+        ]}
+      >
+        <IconComponent size={24} color="#64748B" strokeWidth={2} />
+      </Animated.View>
+
+      {/* Active State */}
+      <Animated.View
+        style={[
+          styles.activeContainer,
+          {
+            opacity: activeOpacity,
+            transform: [{ translateY: activeTranslateY }, { scale: activeScale }],
+          },
+        ]}
+      >
+        <View style={styles.activeIconCircle}>
+          <IconComponent size={24} color="#1C315E" strokeWidth={2.5} />
+        </View>
+      </Animated.View>
     </View>
   );
 }
@@ -36,7 +93,7 @@ export default function TabsLayout() {
         name="home"
         options={{
           tabBarIcon: ({ focused }) => (
-            <TabIcon label="Home" icon="🏠" focused={focused} />
+            <TabIcon focused={focused} IconComponent={Home} />
           ),
         }}
       />
@@ -44,7 +101,7 @@ export default function TabsLayout() {
         name="search"
         options={{
           tabBarIcon: ({ focused }) => (
-            <TabIcon label="Search" icon="🔍" focused={focused} />
+            <TabIcon focused={focused} IconComponent={Search} />
           ),
         }}
       />
@@ -52,7 +109,7 @@ export default function TabsLayout() {
         name="applications"
         options={{
           tabBarIcon: ({ focused }) => (
-            <TabIcon label="Applied" icon="📋" focused={focused} />
+            <TabIcon focused={focused} IconComponent={ClipboardList} />
           ),
         }}
       />
@@ -60,7 +117,7 @@ export default function TabsLayout() {
         name="cv-builder"
         options={{
           tabBarIcon: ({ focused }) => (
-            <TabIcon label="CV" icon="📄" focused={focused} />
+            <TabIcon focused={focused} IconComponent={PenLine} />
           ),
         }}
       />
@@ -68,7 +125,7 @@ export default function TabsLayout() {
         name="profile"
         options={{
           tabBarIcon: ({ focused }) => (
-            <TabIcon label="Profile" icon="👤" focused={focused} />
+            <TabIcon focused={focused} IconComponent={User} />
           ),
         }}
       />
@@ -78,22 +135,43 @@ export default function TabsLayout() {
 
 const styles = StyleSheet.create({
   tabBar: {
-    backgroundColor: Colors.light.tabBackground,
+    backgroundColor: '#FFFFFF',
     borderTopWidth: 1,
-    borderTopColor: Colors.light.border,
-    height: 72,
-    paddingBottom: 8,
-    paddingTop: 4,
+    borderTopColor: '#E2E8F0',
+    height: Platform.OS === 'ios' ? 88 : 70,
+    elevation: 0,
+    shadowOpacity: 0,
   },
-  tabItem: {
+  iconWrapper: {
     alignItems: 'center',
-    gap: 3,
+    justifyContent: 'center',
+    height: 50, // Fixed height to stabilize the container
   },
-  tabIcon: {
-    fontSize: 22,
+  inactiveContainer: {
+    position: 'absolute',
+    top: 16,
   },
-  tabLabel: {
-    ...Typography.micro,
-    fontFamily: 'DMSans_500Medium',
+  activeContainer: {
+    position: 'absolute',
+    top: 16,
+  },
+  activeIconCircle: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    // Shadow to create the cutout effect illusion
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 5,
+    // Add a slight top border color to match the tab bar top border
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderBottomWidth: 0,
   },
 });
+

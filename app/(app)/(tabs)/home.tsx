@@ -12,6 +12,7 @@ import { useAuthStore } from '@/store/authStore';
 import {
   INTERNSHIP_CATEGORIES, formatNairaRange, getGreeting,
 } from '@/constants/AppData';
+import { Search, SlidersHorizontal, MapPin, Clock } from 'lucide-react-native';
 
 // ---------- MOCK DATA ----------
 const FEATURED = [
@@ -79,7 +80,7 @@ export default function HomeScreen() {
         {/* ——— TOP BAR ——— */}
         <View style={styles.topBar}>
           <View>
-            <Text style={styles.greeting}>{greeting}, {firstName} 👋</Text>
+            <Text style={styles.greeting}>{greeting}, {firstName}!</Text>
             <Text style={styles.greetingSub}>Let's find your next opportunity</Text>
           </View>
           <TouchableOpacity
@@ -101,7 +102,7 @@ export default function HomeScreen() {
         {/* ——— SEARCH BAR ——— */}
         <View style={styles.searchRow}>
           <View style={styles.searchInputWrap}>
-            <Text style={styles.searchIcon}>🔍</Text>
+            <Search size={16} color={Colors.light.placeholder} style={styles.searchIcon} />
             <TextInput
               style={styles.searchInput}
               placeholder="Search internships, roles, companies..."
@@ -115,7 +116,7 @@ export default function HomeScreen() {
             style={styles.filterBtn}
             onPress={() => router.push('/(app)/(tabs)/search')}
           >
-            <Text style={styles.filterIcon}>⚙️</Text>
+            <SlidersHorizontal size={18} color="#FFFFFF" />
           </TouchableOpacity>
         </View>
 
@@ -140,7 +141,10 @@ export default function HomeScreen() {
                 <Text style={styles.featuredSalary}>
                   {formatNairaRange(item.salaryMin, item.salaryMax)}
                 </Text>
-                <TouchableOpacity style={styles.featuredApplyBtn}>
+                <TouchableOpacity 
+                  style={styles.featuredApplyBtn}
+                  onPress={() => router.push(`/(app)/apply/${item.id}`)}
+                >
                   <Text style={styles.featuredApplyText}>Apply Now</Text>
                 </TouchableOpacity>
               </View>
@@ -176,7 +180,11 @@ export default function HomeScreen() {
         </View>
         <View style={styles.recommendedGrid}>
           {RECOMMENDED.map((item) => (
-            <TouchableOpacity key={item.id} style={styles.recCard}>
+            <TouchableOpacity 
+              key={item.id} 
+              style={styles.recCard}
+              onPress={() => router.push(`/(app)/apply/${item.id}`)}
+            >
               <View style={styles.recHeader}>
                 <View style={styles.recLogo}>
                   <Text style={styles.recLogoText}>{item.logo}</Text>
@@ -188,7 +196,7 @@ export default function HomeScreen() {
               <Text style={styles.recRole} numberOfLines={2}>{item.role}</Text>
               <Text style={styles.recCompany}>{item.company}</Text>
               <View style={styles.recLocation}>
-                <Text style={styles.recLocationIcon}>📍</Text>
+                <MapPin size={11} color={Colors.light.textMuted} />
                 <Text style={styles.recLocationText}>{item.location}</Text>
               </View>
               <Text style={styles.recSalary}>{formatNairaRange(item.salaryMin, item.salaryMax)}</Text>
@@ -213,13 +221,22 @@ export default function HomeScreen() {
           contentContainerStyle={styles.recentList}
           keyExtractor={(i) => i.id}
           renderItem={({ item }) => (
-            <TouchableOpacity style={styles.recentCard}>
+            <TouchableOpacity 
+              style={styles.recentCard}
+              onPress={() => router.push(`/(app)/apply/${item.id}`)}
+            >
               {item.isNew && (
                 <View style={styles.newBadge}><Text style={styles.newBadgeText}>New</Text></View>
               )}
               <Text style={styles.recentRole} numberOfLines={2}>{item.role}</Text>
               <Text style={styles.recentCompany}>{item.company}</Text>
-              <Text style={styles.recentMeta}>📍 {item.location}  ·  🕐 {item.time}</Text>
+              <View style={styles.recentMetaRow}>
+                <MapPin size={10} color={Colors.light.textMuted} />
+                <Text style={styles.recentMeta}>{item.location}</Text>
+                <Text style={styles.recentMeta}> · </Text>
+                <Clock size={10} color={Colors.light.textMuted} />
+                <Text style={styles.recentMeta}>{item.time}</Text>
+              </View>
             </TouchableOpacity>
           )}
         />
@@ -233,14 +250,21 @@ export default function HomeScreen() {
             </Text>
           </View>
           {SIWES.map((item) => (
-            <TouchableOpacity key={item.id} style={styles.siwesCard}>
+            <TouchableOpacity 
+              key={item.id} 
+              style={styles.siwesCard}
+              onPress={() => router.push(`/(app)/apply/${item.id}`)}
+            >
               <View style={styles.siwesEligibleBadge}>
                 <Text style={styles.siwesEligibleText}>SIWES Eligible</Text>
               </View>
               <Text style={styles.siwesRole}>{item.role}</Text>
               <Text style={styles.siwesCompany}>{item.company}</Text>
               <View style={styles.siwesFooter}>
-                <Text style={styles.siwesMeta}>📍 {item.location}</Text>
+                <View style={styles.siwesMetaRow}>
+                  <MapPin size={10} color="rgba(255,255,255,0.6)" />
+                  <Text style={styles.siwesMeta}>{item.location}</Text>
+                </View>
                 <Text style={styles.siwesSalary}>{formatNairaRange(item.salaryMin, item.salaryMax)}</Text>
               </View>
             </TouchableOpacity>
@@ -360,7 +384,6 @@ const styles = StyleSheet.create({
   recRole: { fontFamily: 'DMSans_600SemiBold', fontSize: 13, color: Colors.light.textDark, marginBottom: 3 },
   recCompany: { ...Typography.label, color: Colors.light.textMuted, marginBottom: 8 },
   recLocation: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 8 },
-  recLocationIcon: { fontSize: 11 },
   recLocationText: { ...Typography.micro, color: Colors.light.textMuted },
   recSalary: { fontFamily: 'DMSans_600SemiBold', fontSize: 11, color: Colors.light.primaryBlue, marginBottom: 8 },
   recMatchBar: {
@@ -384,6 +407,7 @@ const styles = StyleSheet.create({
   newBadgeText: { fontFamily: 'DMSans_700Bold', fontSize: 10, color: '#FFFFFF' },
   recentRole: { fontFamily: 'DMSans_600SemiBold', fontSize: 13, color: Colors.light.textDark, marginBottom: 4, marginRight: 40 },
   recentCompany: { ...Typography.label, color: Colors.light.textMuted, marginBottom: 10 },
+  recentMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   recentMeta: { ...Typography.micro, color: Colors.light.textMuted },
 
   // SIWES
@@ -406,6 +430,7 @@ const styles = StyleSheet.create({
   siwesRole: { fontFamily: 'DMSans_600SemiBold', fontSize: 14, color: '#FFFFFF', marginBottom: 3 },
   siwesCompany: { ...Typography.label, color: 'rgba(255,255,255,0.75)', marginBottom: 10 },
   siwesFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  siwesMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   siwesMeta: { ...Typography.micro, color: 'rgba(255,255,255,0.6)' },
   siwesSalary: { fontFamily: 'DMSans_600SemiBold', fontSize: 12, color: 'rgba(255,255,255,0.9)' },
 });

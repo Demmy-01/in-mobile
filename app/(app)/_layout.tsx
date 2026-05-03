@@ -13,7 +13,7 @@ export default function AppLayout() {
     if (!session) {
       router.replace('/(auth)/sign-in');
     }
-  }, [session, isInitialized]);
+  }, [session, isInitialized, router]);
 
   // Show a loading screen while auth initializes to prevent flash
   if (!isInitialized) {

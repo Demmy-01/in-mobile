@@ -7,6 +7,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Notifications from 'expo-notifications';
 import { Colors } from '@/constants/Colors';
 import { Typography, Radii } from '@/constants/theme';
+import { Bell, Target, ClipboardList, Mic } from 'lucide-react-native';
 
 export default function NotificationsPermissionScreen() {
   const router = useRouter();
@@ -38,7 +39,7 @@ export default function NotificationsPermissionScreen() {
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
         >
-          <Text style={styles.bellIcon}>🔔</Text>
+          <Bell size={44} color="#FFFFFF" />
         </LinearGradient>
         {/* Notification badge dots */}
         <View style={[styles.badge, { top: 0, right: 4 }]}>
@@ -55,12 +56,12 @@ export default function NotificationsPermissionScreen() {
       {/* Benefit list */}
       <View style={styles.benefitList}>
         {[
-          { icon: '🎯', text: 'New internships matching your department' },
-          { icon: '📋', text: 'Application status updates in real-time' },
-          { icon: '🎤', text: 'Interview reminders and prep tips' },
+          { Icon: Target, text: 'New internships matching your department' },
+          { Icon: ClipboardList, text: 'Application status updates in real-time' },
+          { Icon: Mic, text: 'Interview reminders and prep tips' },
         ].map((item, i) => (
           <View key={i} style={styles.benefitItem}>
-            <Text style={styles.benefitIcon}>{item.icon}</Text>
+            <item.Icon size={20} color={Colors.light.accentBlue} />
             <Text style={styles.benefitText}>{item.text}</Text>
           </View>
         ))}
@@ -166,9 +167,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingVertical: 14,
     paddingHorizontal: 16,
-  },
-  benefitIcon: {
-    fontSize: 20,
   },
   benefitText: {
     ...Typography.bodyMedium,

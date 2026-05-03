@@ -47,7 +47,7 @@ export default function RootLayout() {
     );
 
     return () => subscription.unsubscribe();
-  }, []);
+  }, [setSession, setInitialized, fetchProfile]);
 
   useEffect(() => {
     if (fontsLoaded) {

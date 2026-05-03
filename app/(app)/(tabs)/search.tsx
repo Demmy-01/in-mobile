@@ -4,9 +4,11 @@ import {
   FlatList, ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import { Colors } from '@/constants/Colors';
 import { Typography, Radii } from '@/constants/theme';
 import { formatNairaRange, NIGERIAN_LOCATIONS } from '@/constants/AppData';
+import { Search, SlidersHorizontal, MapPin, Clock } from 'lucide-react-native';
 
 const ALL_INTERNSHIPS = [
   { id: '1', role: 'Frontend Developer Intern', company: 'Paystack', location: 'Remote', salaryMin: 80000, salaryMax: 120000, match: 94, daysAgo: 1, logo: '💳', siwes: false },
@@ -22,6 +24,7 @@ const ALL_INTERNSHIPS = [
 ];
 
 export default function SearchScreen() {
+  const router = useRouter();
   const [query, setQuery] = useState('');
   const [sortBy, setSortBy] = useState('match');
   const [showFilter, setShowFilter] = useState(false);
@@ -53,7 +56,7 @@ export default function SearchScreen() {
         <Text style={styles.headerTitle}>Find Internships</Text>
         <View style={styles.searchRow}>
           <View style={styles.searchWrap}>
-            <Text style={styles.searchIcon}>🔍</Text>
+            <Search size={16} color={Colors.light.placeholder} />
             <TextInput
               style={styles.searchInput}
               placeholder="Search roles, companies..."
@@ -63,7 +66,7 @@ export default function SearchScreen() {
             />
           </View>
           <TouchableOpacity style={styles.filterBtn} onPress={() => setShowFilter(!showFilter)}>
-            <Text style={styles.filterIcon}>⚙️</Text>
+            <SlidersHorizontal size={18} color="#FFFFFF" />
           </TouchableOpacity>
         </View>
 
@@ -150,12 +153,21 @@ export default function SearchScreen() {
             <Text style={styles.cardRole}>{item.role}</Text>
             <Text style={styles.cardCompany}>{item.company}</Text>
             <View style={styles.cardMeta}>
-              <Text style={styles.cardMetaText}>📍 {item.location}</Text>
-              <Text style={styles.cardMetaText}>🕐 {item.daysAgo === 1 ? 'Today' : `${item.daysAgo}d ago`}</Text>
+              <View style={styles.cardMetaItem}>
+                <MapPin size={11} color={Colors.light.textMuted} />
+                <Text style={styles.cardMetaText}>{item.location}</Text>
+              </View>
+              <View style={styles.cardMetaItem}>
+                <Clock size={11} color={Colors.light.textMuted} />
+                <Text style={styles.cardMetaText}>{item.daysAgo === 1 ? 'Today' : `${item.daysAgo}d ago`}</Text>
+              </View>
             </View>
             <View style={styles.cardFooter}>
               <Text style={styles.cardSalary}>{formatNairaRange(item.salaryMin, item.salaryMax)}</Text>
-              <TouchableOpacity style={styles.applyBtn}>
+              <TouchableOpacity 
+                style={styles.applyBtn}
+                onPress={() => router.push(`/(app)/apply/${item.id}`)}
+              >
                 <Text style={styles.applyBtnText}>Apply</Text>
               </TouchableOpacity>
             </View>
@@ -246,6 +258,7 @@ const styles = StyleSheet.create({
   cardRole: { fontFamily: 'DMSans_600SemiBold', fontSize: 15, color: Colors.light.textDark, marginBottom: 3 },
   cardCompany: { ...Typography.label, color: Colors.light.textMuted, marginBottom: 10 },
   cardMeta: { flexDirection: 'row', gap: 16, marginBottom: 12 },
+  cardMetaItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   cardMetaText: { ...Typography.micro, color: Colors.light.textMuted },
   cardFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   cardSalary: { fontFamily: 'DMSans_600SemiBold', fontSize: 13, color: Colors.light.primaryBlue },
