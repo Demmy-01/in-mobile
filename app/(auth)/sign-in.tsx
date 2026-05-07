@@ -14,6 +14,7 @@ import {
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { Mail, Key, Eye, EyeOff } from 'lucide-react-native';
+import Svg, { Path, G, Rect, ClipPath, Defs } from 'react-native-svg';
 
 type Tab = 'sign-in' | 'sign-up';
 
@@ -129,6 +130,31 @@ export default function SignInScreen() {
                 ) : (
                   <Text style={styles.submitBtnText}>Sign in</Text>
                 )}
+              </TouchableOpacity>
+
+              {/* Divider */}
+              <View style={styles.dividerRow}>
+                <View style={styles.dividerLine} />
+                <Text style={styles.dividerText}>or</Text>
+                <View style={styles.dividerLine} />
+              </View>
+
+              {/* Google Button */}
+              <TouchableOpacity style={styles.googleBtn} activeOpacity={0.8}>
+                <Svg width={22} height={22} viewBox="0 0 48 48">
+                  <Defs>
+                    <ClipPath id="clip">
+                      <Rect width={48} height={48} />
+                    </ClipPath>
+                  </Defs>
+                  <G clipPath="url(#clip)">
+                    <Path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+                    <Path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
+                    <Path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
+                    <Path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
+                  </G>
+                </Svg>
+                <Text style={styles.googleBtnText}>Continue with Google</Text>
               </TouchableOpacity>
             </View>
 
@@ -247,10 +273,10 @@ const styles = StyleSheet.create({
     color: '#3B82F6',
   },
   buttonContainer: {
-    marginTop: 100, // Push button down like in screenshot
+    marginTop: 100,
   },
   submitBtn: {
-    backgroundColor: '#1C315E', // Dark blue from screenshot
+    backgroundColor: '#1C315E',
     height: 56,
     borderRadius: 16,
     justifyContent: 'center',
@@ -260,6 +286,43 @@ const styles = StyleSheet.create({
     fontFamily: 'DMSans_700Bold',
     fontSize: 16,
     color: '#FFF',
+  },
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 20,
+    gap: 12,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#E5E7EB',
+  },
+  dividerText: {
+    fontFamily: 'DMSans_500Medium',
+    fontSize: 13,
+    color: '#9CA3AF',
+  },
+  googleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 56,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderColor: '#E5E7EB',
+    backgroundColor: '#FFFFFF',
+    gap: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  googleBtnText: {
+    fontFamily: 'DMSans_600SemiBold',
+    fontSize: 15,
+    color: '#1F2937',
   },
 });
 

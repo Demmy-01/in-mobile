@@ -1,10 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { useRouter } from 'expo-router';
-import { View, Image, Animated, StyleSheet, Dimensions } from 'react-native';
+import { View, Image, ImageBackground, Animated, StyleSheet } from 'react-native';
 import { useAuthStore } from '@/store/authStore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-
-const { width, height } = Dimensions.get('window');
 
 export default function Index() {
   const router = useRouter();
@@ -33,14 +31,16 @@ export default function Index() {
     if (!isInitialized) return;
 
     const checkOnboarding = async () => {
-      const hasSeenOnboarding = await AsyncStorage.getItem('has_seen_onboarding');
+      // Always reset onboarding flag so every reload goes through onboarding
+      await AsyncStorage.removeItem('has_seen_onboarding');
+
+      // Show splash for at least 2.5 seconds
+      await new Promise((resolve) => setTimeout(resolve, 6500));
 
       if (session) {
         router.replace('/(app)/(tabs)/home');
-      } else if (!hasSeenOnboarding) {
-        router.replace('/onboarding');
       } else {
-        router.replace('/(auth)/sign-in');
+        router.replace('/onboarding');
       }
     };
 
@@ -48,34 +48,13 @@ export default function Index() {
   }, [isInitialized, session, router]);
 
   return (
-    <View style={styles.container}>
-      {/* Geometric pattern overlay */}
-      <View style={styles.patternOverlay} pointerEvents="none">
-        {Array.from({ length: 12 }).map((_, row) =>
-          Array.from({ length: 8 }).map((_, col) => (
-            <View
-              key={`${row}-${col}`}
-              style={[
-                styles.patternTile,
-                {
-                  left: col * 52 - 10,
-                  top: row * 52 - 10,
-                },
-              ]}
-            >
-              {/* Top-left L shape */}
-              <View style={[styles.patternLine, { width: 22, height: 3, top: 4, left: 4 }]} />
-              <View style={[styles.patternLine, { width: 3, height: 22, top: 4, left: 4 }]} />
-              {/* Bottom-right L shape */}
-              <View style={[styles.patternLine, { width: 22, height: 3, bottom: 4, right: 4 }]} />
-              <View style={[styles.patternLine, { width: 3, height: 22, bottom: 4, right: 4 }]} />
-              {/* Small dot */}
-              <View style={styles.patternDot} />
-            </View>
-          ))
-        )}
-      </View>
-
+    <ImageBackground
+      source={require('../assets/index-bg.jpg')}
+      style={styles.container}
+      resizeMode="cover"
+      // fallback colour shown while image loads
+      imageStyle={{ backgroundColor: '#0D2348' }}
+    >
       {/* Bouncing logo */}
       <Animated.View
         style={[
@@ -89,45 +68,16 @@ export default function Index() {
           resizeMode="contain"
         />
       </Animated.View>
-    </View>
+    </ImageBackground>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#1A3A6B',
     justifyContent: 'center',
     alignItems: 'center',
-    overflow: 'hidden',
-  },
-  patternOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    width: width,
-    height: height,
-  },
-  patternTile: {
-    position: 'absolute',
-    width: 50,
-    height: 50,
-  },
-  patternLine: {
-    position: 'absolute',
-    backgroundColor: 'rgba(255,255,255,0.18)',
-    borderRadius: 2,
-  },
-  patternDot: {
-    position: 'absolute',
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: 'rgba(255,255,255,0.18)',
-    top: '50%',
-    left: '50%',
-    marginTop: -2,
-    marginLeft: -2,
+    backgroundColor: '#0D2348', // shown instantly while image loads
   },
   logoWrapper: {
     width: 140,
