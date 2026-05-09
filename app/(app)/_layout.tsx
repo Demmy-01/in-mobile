@@ -15,8 +15,8 @@ export default function AppLayout() {
     }
   }, [session, isInitialized, router]);
 
-  // Show a loading screen while auth initializes to prevent flash
-  if (!isInitialized) {
+  // Block ALL rendering until auth is resolved — no flash of protected content
+  if (!isInitialized || !session) {
     return (
       <View style={{ flex: 1, backgroundColor: Colors.light.primaryBlue, justifyContent: 'center', alignItems: 'center' }}>
         <ActivityIndicator color={Colors.light.white} size="large" />
@@ -27,6 +27,7 @@ export default function AppLayout() {
   return (
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="(tabs)" />
+      <Stack.Screen name="apply" />
     </Stack>
   );
 }

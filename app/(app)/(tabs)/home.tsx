@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, FlatList,
+  TextInput, FlatList, ActivityIndicator, RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -12,56 +12,40 @@ import { useAuthStore } from '@/store/authStore';
 import {
   INTERNSHIP_CATEGORIES, formatNairaRange, getGreeting,
 } from '@/constants/AppData';
-import { Search, SlidersHorizontal, MapPin, Clock } from 'lucide-react-native';
+import { Search, SlidersHorizontal, MapPin, Clock, Bookmark } from 'lucide-react-native';
+import { supabase } from '@/lib/supabase';
 
-// ---------- MOCK DATA ----------
-const FEATURED = [
-  {
-    id: '1', role: 'Frontend Developer Intern', company: 'Paystack',
-    salaryMin: 80000, salaryMax: 120000, match: 94,
-    gradient: ['#1A3A6B', '#2D6BE4'] as const,
-  },
-  {
-    id: '2', role: 'UI/UX Design Intern', company: 'Flutterwave',
-    salaryMin: 70000, salaryMax: 100000, match: 88,
-    gradient: ['#0D2348', '#1A3A6B'] as const,
-  },
-  {
-    id: '3', role: 'Data Analyst Intern', company: 'Access Bank',
-    salaryMin: 60000, salaryMax: 90000, match: 82,
-    gradient: ['#1A4060', '#2D6BE4'] as const,
-  },
-];
+// ---- Types ----
+interface Listing {
+  id: string;
+  title: string;
+  location: string | null;
+  salary_min: number | null;
+  salary_max: number | null;
+  is_siwes: boolean;
+  created_at: string;
+  required_skills: string[];
+  status: string;
+  organisation_profiles: {
+    name: string;
+    logo_url: string | null;
+  } | null;
+}
 
-const RECOMMENDED = [
-  {
-    id: '1', role: 'Backend Developer', company: 'Andela',
-    location: 'Remote', salaryMin: 90000, salaryMax: 130000, match: 91, logo: '🅐',
-  },
-  {
-    id: '2', role: 'Product Design Intern', company: 'Piggyvest',
-    location: 'Lagos', salaryMin: 65000, salaryMax: 95000, match: 86, logo: '🐷',
-  },
-  {
-    id: '3', role: 'Marketing Intern', company: 'Konga',
-    location: 'Lagos', salaryMin: 50000, salaryMax: 75000, match: 79, logo: '🛒',
-  },
-  {
-    id: '4', role: 'Accounting Intern', company: 'KPMG Nigeria',
-    location: 'Abuja', salaryMin: 70000, salaryMax: 100000, match: 85, logo: '🏦',
-  },
-];
+// Compute a simple match score based on overlapping skills
+function computeMatch(listing: Listing, profileSkills: string[]): number {
+  if (!listing.required_skills?.length || !profileSkills?.length) return 70;
+  const required = listing.required_skills.map((s) => s.toLowerCase());
+  const has = profileSkills.map((s) => s.toLowerCase());
+  const overlap = required.filter((r) => has.includes(r)).length;
+  return Math.min(99, Math.round(70 + (overlap / required.length) * 29));
+}
 
-const RECENT = [
-  { id: '1', role: 'Software Engineer Intern', company: 'Google Nigeria', time: '2hrs ago', location: 'Lagos', isNew: true },
-  { id: '2', role: 'Data Science Intern', company: 'MTN Nigeria', time: '5hrs ago', location: 'Abuja', isNew: true },
-  { id: '3', role: 'Mechanical Eng. Intern', company: 'Dangote Group', time: '1d ago', location: 'Lagos', isNew: false },
-  { id: '4', role: 'Finance Intern', company: 'First Bank', time: '2d ago', location: 'Remote', isNew: false },
-];
-
-const SIWES = [
-  { id: '1', role: 'IT Intern (SIWES)', company: 'NNPC', location: 'Port Harcourt', salaryMin: 40000, salaryMax: 60000 },
-  { id: '2', role: 'Engineering Intern (SIWES)', company: 'Julius Berger', location: 'Abuja', salaryMin: 35000, salaryMax: 55000 },
+const GRADIENTS: [string, string][] = [
+  ['#1A3A6B', '#2D6BE4'],
+  ['#0D2348', '#1A3A6B'],
+  ['#1A4060', '#2D6BE4'],
+  ['#0D3060', '#1E5FA0'],
 ];
 
 export default function HomeScreen() {
@@ -69,13 +53,102 @@ export default function HomeScreen() {
   const { profile } = useAuthStore();
   const [activeCategory, setActiveCategory] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
+  const [listings, setListings] = useState<Listing[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
 
   const firstName = profile?.first_name ?? 'Student';
   const greeting = getGreeting();
+  const profileSkills = profile?.skills ?? [];
+
+  const fetchListings = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('internship_listings')
+      .select('*, organisation_profiles(name, logo_url)')
+      .eq('status', 'ACTIVE')
+      .order('created_at', { ascending: false });
+
+    if (!error && data) {
+      setListings(data as Listing[]);
+    }
+  }, []);
+
+  const fetchSaved = useCallback(async () => {
+    if (!profile?.id) return;
+    const { data } = await supabase
+      .from('saved_listings')
+      .select('listing_id')
+      .eq('student_id', profile.id);
+    if (data) {
+      setSavedIds(new Set(data.map((r: { listing_id: string }) => r.listing_id)));
+    }
+  }, [profile?.id]);
+
+  useEffect(() => {
+    const load = async () => {
+      setIsLoading(true);
+      await Promise.all([fetchListings(), fetchSaved()]);
+      setIsLoading(false);
+    };
+    load();
+  }, [fetchListings, fetchSaved]);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await Promise.all([fetchListings(), fetchSaved()]);
+    setRefreshing(false);
+  };
+
+  const toggleSave = async (listingId: string) => {
+    if (!profile?.id) return;
+    const isSaved = savedIds.has(listingId);
+    if (isSaved) {
+      await supabase
+        .from('saved_listings')
+        .delete()
+        .match({ student_id: profile.id, listing_id: listingId });
+      setSavedIds((prev) => { const s = new Set(prev); s.delete(listingId); return s; });
+    } else {
+      await supabase
+        .from('saved_listings')
+        .insert({ student_id: profile.id, listing_id: listingId });
+      setSavedIds((prev) => new Set(prev).add(listingId));
+    }
+  };
+
+  // Derived sections
+  const withMatch = listings.map((l) => ({ ...l, match: computeMatch(l, profileSkills) }));
+  const featured = withMatch.slice(0, 3);
+  const recommended = [...withMatch].sort((a, b) => b.match - a.match).slice(0, 6);
+  const recent = withMatch.slice(0, 4);
+  const siwes = withMatch.filter((l) => l.is_siwes).slice(0, 3);
+
+  const timeSince = (iso: string) => {
+    const hrs = Math.round((Date.now() - new Date(iso).getTime()) / 3600000);
+    if (hrs < 24) return `${hrs}hrs ago`;
+    const days = Math.floor(hrs / 24);
+    return days === 1 ? '1d ago' : `${days}d ago`;
+  };
+
+  if (isLoading) {
+    return (
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={Colors.light.primaryBlue} />
+          <Text style={styles.loadingText}>Loading opportunities...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
-      <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={styles.scroll}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+      >
 
         {/* ——— TOP BAR ——— */}
         <View style={styles.topBar}>
@@ -121,36 +194,40 @@ export default function HomeScreen() {
         </View>
 
         {/* ——— FEATURED BANNER ——— */}
-        <Text style={styles.sectionTitle}>Featured Opportunities</Text>
-        <FlatList
-          data={FEATURED}
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          snapToInterval={320 + 14}
-          decelerationRate="fast"
-          contentContainerStyle={styles.featuredList}
-          keyExtractor={(i) => i.id}
-          renderItem={({ item }) => (
-            <LinearGradient colors={item.gradient} style={styles.featuredCard}>
-              <View style={styles.featuredBadge}>
-                <Text style={styles.featuredBadgeText}>{item.match}% Match</Text>
-              </View>
-              <Text style={styles.featuredRole}>{item.role}</Text>
-              <Text style={styles.featuredCompany}>{item.company}</Text>
-              <View style={styles.featuredFooter}>
-                <Text style={styles.featuredSalary}>
-                  {formatNairaRange(item.salaryMin, item.salaryMax)}
-                </Text>
-                <TouchableOpacity 
-                  style={styles.featuredApplyBtn}
-                  onPress={() => router.push(`/(app)/apply/${item.id}`)}
-                >
-                  <Text style={styles.featuredApplyText}>Apply Now</Text>
-                </TouchableOpacity>
-              </View>
-            </LinearGradient>
-          )}
-        />
+        {featured.length > 0 && (
+          <>
+            <Text style={styles.sectionTitle}>Featured Opportunities</Text>
+            <FlatList
+              data={featured}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              snapToInterval={320 + 14}
+              decelerationRate="fast"
+              contentContainerStyle={styles.featuredList}
+              keyExtractor={(i) => i.id}
+              renderItem={({ item, index }) => (
+                <LinearGradient colors={GRADIENTS[index % GRADIENTS.length]} style={styles.featuredCard}>
+                  <View style={styles.featuredBadge}>
+                    <Text style={styles.featuredBadgeText}>{item.match}% Match</Text>
+                  </View>
+                  <Text style={styles.featuredRole}>{item.title}</Text>
+                  <Text style={styles.featuredCompany}>{item.organisation_profiles?.name ?? 'Organisation'}</Text>
+                  <View style={styles.featuredFooter}>
+                    <Text style={styles.featuredSalary}>
+                      {formatNairaRange(item.salary_min ?? 0, item.salary_max ?? 0)}
+                    </Text>
+                    <TouchableOpacity
+                      style={styles.featuredApplyBtn}
+                      onPress={() => router.push(`/(app)/apply/${item.id}`)}
+                    >
+                      <Text style={styles.featuredApplyText}>Apply Now</Text>
+                    </TouchableOpacity>
+                  </View>
+                </LinearGradient>
+              )}
+            />
+          </>
+        )}
 
         {/* ——— CATEGORY CHIPS ——— */}
         <ScrollView
@@ -172,104 +249,140 @@ export default function HomeScreen() {
         </ScrollView>
 
         {/* ——— RECOMMENDED ——— */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Recommended For You</Text>
-          <TouchableOpacity onPress={() => router.push('/(app)/(tabs)/search')}>
-            <Text style={styles.viewAll}>View All</Text>
-          </TouchableOpacity>
-        </View>
-        <View style={styles.recommendedGrid}>
-          {RECOMMENDED.map((item) => (
-            <TouchableOpacity 
-              key={item.id} 
-              style={styles.recCard}
-              onPress={() => router.push(`/(app)/apply/${item.id}`)}
-            >
-              <View style={styles.recHeader}>
-                <View style={styles.recLogo}>
-                  <Text style={styles.recLogoText}>{item.logo}</Text>
-                </View>
-                <View style={styles.recMatchBadge}>
-                  <Text style={styles.recMatchText}>{item.match}%</Text>
-                </View>
-              </View>
-              <Text style={styles.recRole} numberOfLines={2}>{item.role}</Text>
-              <Text style={styles.recCompany}>{item.company}</Text>
-              <View style={styles.recLocation}>
-                <MapPin size={11} color={Colors.light.textMuted} />
-                <Text style={styles.recLocationText}>{item.location}</Text>
-              </View>
-              <Text style={styles.recSalary}>{formatNairaRange(item.salaryMin, item.salaryMax)}</Text>
-              <View style={styles.recMatchBar}>
-                <View style={[styles.recMatchFill, { width: `${item.match}%` }]} />
-              </View>
-            </TouchableOpacity>
-          ))}
-        </View>
+        {recommended.length > 0 && (
+          <>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Recommended For You</Text>
+              <TouchableOpacity onPress={() => router.push('/(app)/(tabs)/search')}>
+                <Text style={styles.viewAll}>View All</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.recommendedGrid}>
+              {recommended.map((item) => {
+                const orgName = item.organisation_profiles?.name ?? 'Organisation';
+                const initials = orgName.charAt(0).toUpperCase();
+                return (
+                  <TouchableOpacity
+                    key={item.id}
+                    style={styles.recCard}
+                    onPress={() => router.push(`/(app)/apply/${item.id}`)}
+                  >
+                    <View style={styles.recHeader}>
+                      <View style={styles.recLogo}>
+                        <Text style={styles.recLogoText}>{initials}</Text>
+                      </View>
+                      <View style={styles.recTopRight}>
+                        <View style={styles.recMatchBadge}>
+                          <Text style={styles.recMatchText}>{item.match}%</Text>
+                        </View>
+                        <TouchableOpacity onPress={() => toggleSave(item.id)}>
+                          <Bookmark
+                            size={16}
+                            color={savedIds.has(item.id) ? Colors.light.primaryBlue : Colors.light.textMuted}
+                            fill={savedIds.has(item.id) ? Colors.light.primaryBlue : 'none'}
+                          />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                    <Text style={styles.recRole} numberOfLines={2}>{item.title}</Text>
+                    <Text style={styles.recCompany}>{orgName}</Text>
+                    <View style={styles.recLocation}>
+                      <MapPin size={11} color={Colors.light.textMuted} />
+                      <Text style={styles.recLocationText}>{item.location ?? 'Remote'}</Text>
+                    </View>
+                    <Text style={styles.recSalary}>{formatNairaRange(item.salary_min ?? 0, item.salary_max ?? 0)}</Text>
+                    <View style={styles.recMatchBar}>
+                      <View style={[styles.recMatchFill, { width: `${item.match}%` }]} />
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </>
+        )}
 
         {/* ——— RECENTLY POSTED ——— */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Recently Posted</Text>
-          <TouchableOpacity onPress={() => router.push('/(app)/(tabs)/search')}>
-            <Text style={styles.viewAll}>See All</Text>
-          </TouchableOpacity>
-        </View>
-        <FlatList
-          data={RECENT}
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.recentList}
-          keyExtractor={(i) => i.id}
-          renderItem={({ item }) => (
-            <TouchableOpacity 
-              style={styles.recentCard}
-              onPress={() => router.push(`/(app)/apply/${item.id}`)}
-            >
-              {item.isNew && (
-                <View style={styles.newBadge}><Text style={styles.newBadgeText}>New</Text></View>
-              )}
-              <Text style={styles.recentRole} numberOfLines={2}>{item.role}</Text>
-              <Text style={styles.recentCompany}>{item.company}</Text>
-              <View style={styles.recentMetaRow}>
-                <MapPin size={10} color={Colors.light.textMuted} />
-                <Text style={styles.recentMeta}>{item.location}</Text>
-                <Text style={styles.recentMeta}> · </Text>
-                <Clock size={10} color={Colors.light.textMuted} />
-                <Text style={styles.recentMeta}>{item.time}</Text>
-              </View>
-            </TouchableOpacity>
-          )}
-        />
+        {recent.length > 0 && (
+          <>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Recently Posted</Text>
+              <TouchableOpacity onPress={() => router.push('/(app)/(tabs)/search')}>
+                <Text style={styles.viewAll}>See All</Text>
+              </TouchableOpacity>
+            </View>
+            <FlatList
+              data={recent}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.recentList}
+              keyExtractor={(i) => i.id}
+              renderItem={({ item }) => {
+                const hrs = Math.round((Date.now() - new Date(item.created_at).getTime()) / 3600000);
+                const isNew = hrs < 48;
+                return (
+                  <TouchableOpacity
+                    style={styles.recentCard}
+                    onPress={() => router.push(`/(app)/apply/${item.id}`)}
+                  >
+                    {isNew && (
+                      <View style={styles.newBadge}><Text style={styles.newBadgeText}>New</Text></View>
+                    )}
+                    <Text style={styles.recentRole} numberOfLines={2}>{item.title}</Text>
+                    <Text style={styles.recentCompany}>{item.organisation_profiles?.name ?? 'Organisation'}</Text>
+                    <View style={styles.recentMetaRow}>
+                      <MapPin size={10} color={Colors.light.textMuted} />
+                      <Text style={styles.recentMeta}>{item.location ?? 'Remote'}</Text>
+                      <Text style={styles.recentMeta}> · </Text>
+                      <Clock size={10} color={Colors.light.textMuted} />
+                      <Text style={styles.recentMeta}>{timeSince(item.created_at)}</Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              }}
+            />
+          </>
+        )}
 
         {/* ——— SIWES SECTION ——— */}
-        <View style={styles.siwesSection}>
-          <View style={styles.siwesHeader}>
-            <Text style={styles.siwesTitle}>SIWES Opportunities</Text>
-            <Text style={styles.siwesSubtitle}>
-              Approved industrial training placements for your programme
-            </Text>
-          </View>
-          {SIWES.map((item) => (
-            <TouchableOpacity 
-              key={item.id} 
-              style={styles.siwesCard}
-              onPress={() => router.push(`/(app)/apply/${item.id}`)}
-            >
-              <View style={styles.siwesEligibleBadge}>
-                <Text style={styles.siwesEligibleText}>SIWES Eligible</Text>
-              </View>
-              <Text style={styles.siwesRole}>{item.role}</Text>
-              <Text style={styles.siwesCompany}>{item.company}</Text>
-              <View style={styles.siwesFooter}>
-                <View style={styles.siwesMetaRow}>
-                  <MapPin size={10} color="rgba(255,255,255,0.6)" />
-                  <Text style={styles.siwesMeta}>{item.location}</Text>
+        {siwes.length > 0 && (
+          <View style={styles.siwesSection}>
+            <View style={styles.siwesHeader}>
+              <Text style={styles.siwesTitle}>SIWES Opportunities</Text>
+              <Text style={styles.siwesSubtitle}>
+                Approved industrial training placements for your programme
+              </Text>
+            </View>
+            {siwes.map((item) => (
+              <TouchableOpacity
+                key={item.id}
+                style={styles.siwesCard}
+                onPress={() => router.push(`/(app)/apply/${item.id}`)}
+              >
+                <View style={styles.siwesEligibleBadge}>
+                  <Text style={styles.siwesEligibleText}>SIWES Eligible</Text>
                 </View>
-                <Text style={styles.siwesSalary}>{formatNairaRange(item.salaryMin, item.salaryMax)}</Text>
-              </View>
-            </TouchableOpacity>
-          ))}
-        </View>
+                <Text style={styles.siwesRole}>{item.title}</Text>
+                <Text style={styles.siwesCompany}>{item.organisation_profiles?.name ?? 'Organisation'}</Text>
+                <View style={styles.siwesFooter}>
+                  <View style={styles.siwesMetaRow}>
+                    <MapPin size={10} color="rgba(255,255,255,0.6)" />
+                    <Text style={styles.siwesMeta}>{item.location ?? 'Remote'}</Text>
+                  </View>
+                  <Text style={styles.siwesSalary}>{formatNairaRange(item.salary_min ?? 0, item.salary_max ?? 0)}</Text>
+                </View>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+
+        {/* Empty state when no listings */}
+        {listings.length === 0 && (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyIcon}>🔍</Text>
+            <Text style={styles.emptyTitle}>No listings yet</Text>
+            <Text style={styles.emptyText}>Check back soon — organisations are adding internships.</Text>
+          </View>
+        )}
 
         <View style={{ height: 100 }} />
       </ScrollView>
@@ -280,6 +393,8 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: Colors.light.background },
   scroll: { flex: 1 },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 16 },
+  loadingText: { ...Typography.body, color: Colors.light.textMuted },
 
   // Top Bar
   topBar: {
@@ -314,7 +429,6 @@ const styles = StyleSheet.create({
     width: 50, height: 50, backgroundColor: Colors.light.primaryBlue,
     borderRadius: Radii.lg, justifyContent: 'center', alignItems: 'center',
   },
-  filterIcon: { fontSize: 18 },
 
   // Sections
   sectionTitle: {
@@ -375,7 +489,8 @@ const styles = StyleSheet.create({
     width: 38, height: 38, borderRadius: 12,
     backgroundColor: Colors.light.lightBlue, justifyContent: 'center', alignItems: 'center',
   },
-  recLogoText: { fontSize: 18 },
+  recLogoText: { fontFamily: 'DMSans_700Bold', fontSize: 16, color: Colors.light.primaryBlue },
+  recTopRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   recMatchBadge: {
     backgroundColor: Colors.light.lightBlue, borderRadius: 10,
     paddingHorizontal: 8, paddingVertical: 4,
@@ -433,4 +548,10 @@ const styles = StyleSheet.create({
   siwesMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   siwesMeta: { ...Typography.micro, color: 'rgba(255,255,255,0.6)' },
   siwesSalary: { fontFamily: 'DMSans_600SemiBold', fontSize: 12, color: 'rgba(255,255,255,0.9)' },
+
+  // Empty
+  emptyState: { alignItems: 'center', paddingTop: 60, paddingHorizontal: 40, gap: 10 },
+  emptyIcon: { fontSize: 48 },
+  emptyTitle: { fontFamily: 'DMSans_600SemiBold', fontSize: 18, color: Colors.light.textDark },
+  emptyText: { ...Typography.body, color: Colors.light.textMuted, textAlign: 'center' },
 });

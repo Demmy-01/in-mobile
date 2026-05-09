@@ -1,7 +1,7 @@
 import { Tabs } from 'expo-router';
 import { View, StyleSheet, Platform, Animated } from 'react-native';
 import { Colors } from '@/constants/Colors';
-import { Home, Search, ClipboardList, PenLine, User } from 'lucide-react-native';
+import { Home, Search, ClipboardList, PenLine, Mic, User } from 'lucide-react-native';
 
 type TabIconProps = {
   focused: boolean;
@@ -118,6 +118,14 @@ export default function TabsLayout() {
         options={{
           tabBarIcon: ({ focused }) => (
             <TabIcon focused={focused} IconComponent={PenLine} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="interview-prep"
+        options={{
+          tabBarIcon: ({ focused }) => (
+            <TabIcon focused={focused} IconComponent={Mic} />
           ),
         }}
       />

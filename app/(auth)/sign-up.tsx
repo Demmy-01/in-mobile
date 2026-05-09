@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { signInWithGoogle } from '@/lib/googleAuth';
 import {
   View,
   Text,
@@ -29,6 +30,7 @@ export default function SignUpScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [agreed, setAgreed] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
 
   const handleSignUp = async () => {
     if (!firstName.trim() || !lastName.trim() || !matricNumber.trim() || !email.trim() || !password) {
@@ -60,6 +62,24 @@ export default function SignUpScreen() {
     if (error) {
       Alert.alert('Registration Failed', error.message);
     } else if (data?.user) {
+      // Insert the student_profiles row (auth trigger may not exist yet)
+      const { error: profileError } = await supabase.from('student_profiles').insert({
+        id: data.user.id,
+        first_name: firstName.trim(),
+        last_name: lastName.trim(),
+        matric_number: matricNumber.trim().toUpperCase(),
+        email: email.trim(),
+        skills: [],
+        hobbies: [],
+      });
+
+      if (profileError) {
+        // Ignore duplicate key error (row already exists via DB trigger)
+        if (!profileError.message.includes('duplicate')) {
+          console.warn('Profile insert warning:', profileError.message);
+        }
+      }
+
       // Pass required params to OTP screen
       router.push({ pathname: '/(auth)/otp', params: { email: email.trim(), firstName: firstName.trim() } });
     }
@@ -204,7 +224,17 @@ export default function SignUpScreen() {
               </View>
 
               {/* Google Button */}
-              <TouchableOpacity style={styles.googleBtn} activeOpacity={0.8}>
+              <TouchableOpacity
+                style={styles.googleBtn}
+                activeOpacity={0.8}
+                disabled={isGoogleLoading}
+                onPress={async () => {
+                  setIsGoogleLoading(true);
+                  const { error } = await signInWithGoogle();
+                  setIsGoogleLoading(false);
+                  if (error) Alert.alert('Google Sign-In Failed', error);
+                }}
+              >
                 <Svg width={22} height={22} viewBox="0 0 48 48">
                   <Defs>
                     <ClipPath id="clip">
@@ -218,7 +248,10 @@ export default function SignUpScreen() {
                     <Path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
                   </G>
                 </Svg>
-                <Text style={styles.googleBtnText}>Continue with Google</Text>
+                {isGoogleLoading
+                  ? <ActivityIndicator size="small" color="#1F2937" />
+                  : <Text style={styles.googleBtnText}>Continue with Google</Text>
+                }
               </TouchableOpacity>
             </View>
 

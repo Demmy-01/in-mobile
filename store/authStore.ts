@@ -13,6 +13,7 @@ export interface StudentProfile {
   phone?: string;
   bio?: string;
   skills: string[];
+  hobbies: string[];
   linkedin_url?: string;
   portfolio_url?: string;
   avatar_url?: string;
@@ -45,8 +46,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   isLoading: false,
   isInitialized: false,
 
-  setSession: (session) =>
-    set({ session, user: session?.user ?? null }),
+  setSession: (session) => {
+    const currentUserId = get().user?.id;
+    const newUserId = session?.user?.id;
+    // If the user has changed (including sign-out), wipe the cached profile
+    if (currentUserId !== newUserId) {
+      set({ session, user: session?.user ?? null, profile: null });
+    } else {
+      set({ session, user: session?.user ?? null });
+    }
+  },
 
   setProfile: (profile) => set({ profile }),
 
@@ -77,7 +86,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   updateProfile: async (updates) => {
     const { user, profile } = get();
-    if (!user) return;
+    if (!user) throw new Error('Not authenticated');
 
     const { data, error } = await supabase
       .from('student_profiles')
@@ -86,7 +95,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       .select()
       .single();
 
-    if (!error && data) {
+    if (error) {
+      console.error('[updateProfile] Supabase error:', error);
+      throw new Error(error.message);
+    }
+    if (data) {
       set({ profile: { ...profile!, ...data } });
     }
   },

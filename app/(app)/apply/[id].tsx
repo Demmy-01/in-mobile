@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,48 +9,150 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ArrowLeft, UploadCloud, FileText } from 'lucide-react-native';
+import { ArrowLeft, UploadCloud, FileText, MapPin, Clock, Briefcase } from 'lucide-react-native';
 import { Colors } from '@/constants/Colors';
 import { Typography, Radii } from '@/constants/theme';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuthStore } from '@/store/authStore';
+import { supabase } from '@/lib/supabase';
+import { formatNairaRange } from '@/constants/AppData';
+
+interface Listing {
+  id: string;
+  title: string;
+  description: string | null;
+  location: string | null;
+  work_mode: string | null;
+  duration: string | null;
+  salary_min: number | null;
+  salary_max: number | null;
+  deadline: string | null;
+  is_siwes: boolean;
+  required_skills: string[];
+  organisation_profiles: { name: string; logo_url: string | null } | null;
+}
 
 export default function ApplyScreen() {
-  const { id } = useLocalSearchParams();
+  const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { profile } = useAuthStore();
-  
+
+  const [listing, setListing] = useState<Listing | null>(null);
+  const [isLoadingListing, setIsLoadingListing] = useState(true);
+  const [alreadyApplied, setAlreadyApplied] = useState(false);
   const [coverLetter, setCoverLetter] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // In a real app, we'd fetch the internship details using the `id`.
-  // For now, we'll use a placeholder.
-  const roleName = "Internship Position";
+  useEffect(() => {
+    if (!id) return;
+    const load = async () => {
+      setIsLoadingListing(true);
+      const [listingRes, appRes] = await Promise.all([
+        supabase
+          .from('internship_listings')
+          .select('*, organisation_profiles(name, logo_url)')
+          .eq('id', id)
+          .single(),
+        profile?.id
+          ? supabase
+              .from('applications')
+              .select('id')
+              .eq('student_id', profile.id)
+              .eq('listing_id', id)
+              .maybeSingle()
+          : Promise.resolve({ data: null, error: null }),
+      ]);
 
-  const handleApply = () => {
+      if (listingRes.data) setListing(listingRes.data as Listing);
+      if (appRes.data) setAlreadyApplied(true);
+      setIsLoadingListing(false);
+    };
+    load();
+  }, [id, profile?.id]);
+
+  const handleApply = async () => {
     if (!coverLetter.trim()) {
       Alert.alert('Missing Field', 'Please provide a cover letter or note to the employer.');
       return;
     }
+    if (!profile?.id || !id) {
+      Alert.alert('Error', 'You must be signed in to apply.');
+      return;
+    }
+    if (alreadyApplied) {
+      Alert.alert('Already Applied', 'You have already submitted an application for this position.');
+      return;
+    }
 
     setIsSubmitting(true);
-    
-    // Simulate API call
-    setTimeout(() => {
-      setIsSubmitting(false);
+
+    const { error } = await supabase.from('applications').insert({
+      student_id: profile.id,
+      listing_id: id,
+      cover_letter: coverLetter.trim(),
+      cv_used: false,
+      status: 'Pending',
+      timeline: ['Applied'],
+    });
+
+    setIsSubmitting(false);
+
+    if (error) {
+      Alert.alert('Submission Failed', error.message);
+    } else {
+      setAlreadyApplied(true);
       Alert.alert(
         'Application Submitted! 🎉',
         'Your application has been successfully sent to the employer.',
         [
           { text: 'View Applications', onPress: () => router.replace('/(app)/(tabs)/applications') },
-          { text: 'Back to Search', onPress: () => router.back() }
+          { text: 'Back to Home', onPress: () => router.replace('/(app)/(tabs)/home') },
         ]
       );
-    }, 1500);
+    }
   };
+
+  if (isLoadingListing) {
+    return (
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+        <View style={styles.header}>
+          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+            <ArrowLeft size={24} color={Colors.light.textDark} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Apply</Text>
+          <View style={{ width: 24 }} />
+        </View>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={Colors.light.primaryBlue} />
+          <Text style={styles.loadingText}>Loading listing details...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!listing) {
+    return (
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+        <View style={styles.header}>
+          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+            <ArrowLeft size={24} color={Colors.light.textDark} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Apply</Text>
+          <View style={{ width: 24 }} />
+        </View>
+        <View style={styles.loadingContainer}>
+          <Text style={styles.loadingText}>Listing not found.</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  const orgName = listing.organisation_profiles?.name ?? 'Organisation';
+  const orgInitial = orgName.charAt(0).toUpperCase();
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
@@ -60,7 +162,7 @@ export default function ApplyScreen() {
           <ArrowLeft size={24} color={Colors.light.textDark} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Apply</Text>
-        <View style={{ width: 24 }} /> {/* Spacer */}
+        <View style={{ width: 24 }} />
       </View>
 
       <KeyboardAvoidingView
@@ -68,11 +170,58 @@ export default function ApplyScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <ScrollView style={styles.scrollContent} showsVerticalScrollIndicator={false}>
-          
-          <View style={styles.roleInfo}>
-            <Text style={styles.applyingFor}>You are applying for:</Text>
-            <Text style={styles.roleName}>{roleName}</Text>
+
+          {/* Listing Info Card */}
+          <View style={styles.listingCard}>
+            <View style={styles.listingLogoRow}>
+              <View style={styles.listingLogo}>
+                <Text style={styles.listingLogoText}>{orgInitial}</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.listingTitle}>{listing.title}</Text>
+                <Text style={styles.listingOrg}>{orgName}</Text>
+              </View>
+            </View>
+            <View style={styles.listingMeta}>
+              {listing.location && (
+                <View style={styles.metaItem}>
+                  <MapPin size={13} color={Colors.light.textMuted} />
+                  <Text style={styles.metaText}>{listing.location}</Text>
+                </View>
+              )}
+              {listing.work_mode && (
+                <View style={styles.metaItem}>
+                  <Briefcase size={13} color={Colors.light.textMuted} />
+                  <Text style={styles.metaText}>{listing.work_mode}</Text>
+                </View>
+              )}
+              {listing.deadline && (
+                <View style={styles.metaItem}>
+                  <Clock size={13} color={Colors.light.textMuted} />
+                  <Text style={styles.metaText}>Deadline: {new Date(listing.deadline).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' })}</Text>
+                </View>
+              )}
+            </View>
+            <Text style={styles.listingSalary}>
+              {formatNairaRange(listing.salary_min ?? 0, listing.salary_max ?? 0)} / month
+            </Text>
+            {listing.required_skills?.length > 0 && (
+              <View style={styles.skillsRow}>
+                {listing.required_skills.slice(0, 4).map((s) => (
+                  <View key={s} style={styles.skillChip}>
+                    <Text style={styles.skillChipText}>{s}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
           </View>
+
+          {/* Already applied banner */}
+          {alreadyApplied && (
+            <View style={styles.alreadyAppliedBanner}>
+              <Text style={styles.alreadyAppliedText}>✅ You have already applied for this position.</Text>
+            </View>
+          )}
 
           <View style={styles.formGroup}>
             <Text style={styles.label}>Full Name</Text>
@@ -104,7 +253,7 @@ export default function ApplyScreen() {
           </View>
 
           <View style={styles.formGroup}>
-            <Text style={styles.label}>Cover Letter (Optional but recommended)</Text>
+            <Text style={styles.label}>Cover Letter (Recommended)</Text>
             <TextInput
               style={styles.textArea}
               placeholder="Why are you a great fit for this role?"
@@ -113,6 +262,7 @@ export default function ApplyScreen() {
               textAlignVertical="top"
               value={coverLetter}
               onChangeText={setCoverLetter}
+              editable={!alreadyApplied}
             />
           </View>
 
@@ -123,18 +273,22 @@ export default function ApplyScreen() {
       {/* Footer */}
       <View style={styles.footer}>
         <TouchableOpacity
-          style={[styles.submitBtn, isSubmitting && styles.submitBtnDisabled]}
+          style={[styles.submitBtn, (isSubmitting || alreadyApplied) && styles.submitBtnDisabled]}
           onPress={handleApply}
-          disabled={isSubmitting}
+          disabled={isSubmitting || alreadyApplied}
         >
           <LinearGradient
-            colors={isSubmitting ? ['#A0AABF', '#A0AABF'] : [Colors.light.accentBlue, Colors.light.primaryBlue]}
+            colors={
+              isSubmitting || alreadyApplied
+                ? ['#A0AABF', '#A0AABF']
+                : [Colors.light.accentBlue, Colors.light.primaryBlue]
+            }
             style={styles.submitGradient}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 0 }}
           >
             <Text style={styles.submitText}>
-              {isSubmitting ? 'Submitting...' : 'Submit Application'}
+              {alreadyApplied ? 'Already Applied' : isSubmitting ? 'Submitting...' : 'Submit Application'}
             </Text>
           </LinearGradient>
         </TouchableOpacity>
@@ -144,162 +298,87 @@ export default function ApplyScreen() {
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: Colors.light.background,
-  },
+  safeArea: { flex: 1, backgroundColor: Colors.light.background },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 16 },
+  loadingText: { ...Typography.body, color: Colors.light.textMuted },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.light.border,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 20, paddingVertical: 16,
+    borderBottomWidth: 1, borderBottomColor: Colors.light.border,
   },
-  backBtn: {
-    padding: 4,
-    marginLeft: -4,
+  backBtn: { padding: 4, marginLeft: -4 },
+  headerTitle: { fontFamily: 'DMSans_700Bold', fontSize: 18, color: Colors.light.textDark },
+  scrollContent: { flex: 1, paddingHorizontal: 20, paddingTop: 20 },
+
+  // Listing card
+  listingCard: {
+    backgroundColor: Colors.light.white, borderRadius: Radii.card,
+    padding: 18, borderWidth: 1, borderColor: Colors.light.cardBorder, marginBottom: 20,
   },
-  headerTitle: {
-    fontFamily: 'DMSans_700Bold',
-    fontSize: 18,
-    color: Colors.light.textDark,
+  listingLogoRow: { flexDirection: 'row', gap: 14, alignItems: 'flex-start', marginBottom: 14 },
+  listingLogo: {
+    width: 50, height: 50, borderRadius: 14,
+    backgroundColor: Colors.light.lightBlue, justifyContent: 'center', alignItems: 'center',
   },
-  scrollContent: {
-    flex: 1,
-    paddingHorizontal: 20,
-    paddingTop: 24,
-  },
-  roleInfo: {
-    marginBottom: 32,
-    alignItems: 'center',
-    padding: 16,
-    backgroundColor: Colors.light.surfaceGrey,
-    borderRadius: Radii.card,
-    borderWidth: 1,
-    borderColor: Colors.light.border,
-  },
-  applyingFor: {
-    ...Typography.body,
-    color: Colors.light.textMuted,
-    marginBottom: 4,
-  },
-  roleName: {
-    fontFamily: 'DMSans_700Bold',
-    fontSize: 18,
-    color: Colors.light.textDark,
-    textAlign: 'center',
-  },
-  formGroup: {
-    marginBottom: 24,
-  },
-  label: {
-    fontFamily: 'DMSans_600SemiBold',
-    fontSize: 14,
-    color: Colors.light.textDark,
-    marginBottom: 8,
-  },
-  input: {
-    height: 52,
-    backgroundColor: Colors.light.surfaceGrey,
-    borderWidth: 1,
-    borderColor: Colors.light.border,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    ...Typography.body,
-    color: Colors.light.textMuted, // muted because disabled
-  },
-  uploadArea: {
-    borderWidth: 1,
-    borderColor: Colors.light.primaryBlue + '50',
-    borderStyle: 'dashed',
-    borderRadius: Radii.card,
-    paddingVertical: 28,
-    alignItems: 'center',
+  listingLogoText: { fontFamily: 'DMSans_700Bold', fontSize: 22, color: Colors.light.primaryBlue },
+  listingTitle: { fontFamily: 'DMSans_700Bold', fontSize: 16, color: Colors.light.textDark, marginBottom: 3 },
+  listingOrg: { ...Typography.label, color: Colors.light.textMuted },
+  listingMeta: { gap: 6, marginBottom: 12 },
+  metaItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  metaText: { ...Typography.label, color: Colors.light.textMuted },
+  listingSalary: { fontFamily: 'DMSans_700Bold', fontSize: 15, color: Colors.light.primaryBlue, marginBottom: 12 },
+  skillsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  skillChip: {
+    paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20,
     backgroundColor: Colors.light.lightBlue,
   },
-  uploadTitle: {
-    fontFamily: 'DMSans_600SemiBold',
-    fontSize: 15,
-    color: Colors.light.primaryBlue,
-    marginTop: 12,
+  skillChipText: { ...Typography.micro, color: Colors.light.accentBlue },
+
+  alreadyAppliedBanner: {
+    backgroundColor: Colors.light.success + '15',
+    borderRadius: Radii.md, padding: 14, marginBottom: 20,
+    borderWidth: 1, borderColor: Colors.light.success + '40',
   },
-  uploadSub: {
-    ...Typography.micro,
-    color: Colors.light.textMuted,
-    marginTop: 4,
+  alreadyAppliedText: { fontFamily: 'DMSans_600SemiBold', fontSize: 13, color: Colors.light.success },
+
+  formGroup: { marginBottom: 24 },
+  label: { fontFamily: 'DMSans_600SemiBold', fontSize: 14, color: Colors.light.textDark, marginBottom: 8 },
+  input: {
+    height: 52, backgroundColor: Colors.light.surfaceGrey,
+    borderWidth: 1, borderColor: Colors.light.border,
+    borderRadius: 12, paddingHorizontal: 16,
+    ...Typography.body, color: Colors.light.textMuted,
   },
-  divider: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: 16,
+  uploadArea: {
+    borderWidth: 1, borderColor: Colors.light.primaryBlue + '50',
+    borderStyle: 'dashed', borderRadius: Radii.card,
+    paddingVertical: 28, alignItems: 'center',
+    backgroundColor: Colors.light.lightBlue,
   },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: Colors.light.border,
-  },
-  dividerText: {
-    marginHorizontal: 12,
-    ...Typography.micro,
-    color: Colors.light.textMuted,
-    fontFamily: 'DMSans_600SemiBold',
-  },
+  uploadTitle: { fontFamily: 'DMSans_600SemiBold', fontSize: 15, color: Colors.light.primaryBlue, marginTop: 12 },
+  uploadSub: { ...Typography.micro, color: Colors.light.textMuted, marginTop: 4 },
+  divider: { flexDirection: 'row', alignItems: 'center', marginVertical: 16 },
+  dividerLine: { flex: 1, height: 1, backgroundColor: Colors.light.border },
+  dividerText: { marginHorizontal: 12, ...Typography.micro, color: Colors.light.textMuted, fontFamily: 'DMSans_600SemiBold' },
   cvBuilderBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    height: 52,
-    borderWidth: 1,
-    borderColor: Colors.light.primaryBlue,
-    borderRadius: 12,
-    backgroundColor: '#FFFFFF',
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    height: 52, borderWidth: 1, borderColor: Colors.light.primaryBlue,
+    borderRadius: 12, backgroundColor: '#FFFFFF',
   },
-  cvBuilderBtnText: {
-    fontFamily: 'DMSans_600SemiBold',
-    fontSize: 15,
-    color: Colors.light.primaryBlue,
-  },
+  cvBuilderBtnText: { fontFamily: 'DMSans_600SemiBold', fontSize: 15, color: Colors.light.primaryBlue },
   textArea: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: Colors.light.border,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 16,
-    minHeight: 120,
-    ...Typography.body,
-    color: Colors.light.textDark,
+    backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: Colors.light.border,
+    borderRadius: 12, paddingHorizontal: 16, paddingTop: 16, paddingBottom: 16,
+    minHeight: 120, ...Typography.body, color: Colors.light.textDark,
   },
-  spacing: {
-    height: 40,
-  },
+  spacing: { height: 40 },
   footer: {
-    paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingHorizontal: 20, paddingVertical: 16,
     paddingBottom: Platform.OS === 'ios' ? 34 : 20,
-    borderTopWidth: 1,
-    borderTopColor: Colors.light.border,
-    backgroundColor: '#FFFFFF',
+    borderTopWidth: 1, borderTopColor: Colors.light.border, backgroundColor: '#FFFFFF',
   },
-  submitBtn: {
-    borderRadius: Radii.button,
-    overflow: 'hidden',
-  },
-  submitBtnDisabled: {
-    opacity: 0.7,
-  },
-  submitGradient: {
-    paddingVertical: 16,
-    alignItems: 'center',
-    borderRadius: Radii.button,
-  },
-  submitText: {
-    ...Typography.button,
-    color: '#FFFFFF',
-    fontSize: 16,
-  },
+  submitBtn: { borderRadius: Radii.button, overflow: 'hidden' },
+  submitBtnDisabled: { opacity: 0.7 },
+  submitGradient: { paddingVertical: 16, alignItems: 'center', borderRadius: Radii.button },
+  submitText: { ...Typography.button, color: '#FFFFFF', fontSize: 16 },
 });

@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { Alert } from 'react-native';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
 } from 'react-native';
@@ -8,6 +9,7 @@ import { Colors } from '@/constants/Colors';
 import { Typography, Radii } from '@/constants/theme';
 import { SKILLS_LIST } from '@/constants/AppData';
 import { useAuthStore } from '@/store/authStore';
+import { supabase } from '@/lib/supabase';
 
 const TEMPLATES = [
   { id: '1', name: 'Modern Professional', price: 15500, tag: 'ATS-Optimized', recommended: true, emoji: '📄' },
@@ -16,16 +18,59 @@ const TEMPLATES = [
   { id: '4', name: 'Tech Focused', price: 10000, tag: 'Modern', recommended: false, emoji: '💻' },
 ];
 
-const STEPS = ['Profile', 'Skills', 'Target Role', 'Preferences'];
+const SECTIONS = [
+  { id: 0, label: 'Personal',   icon: '👤' },
+  { id: 1, label: 'Summary',    icon: '📝' },
+  { id: 2, label: 'Education',  icon: '🎓' },
+  { id: 3, label: 'Experience', icon: '💼' },
+  { id: 4, label: 'Projects',   icon: '⟨⟩' },
+  { id: 5, label: 'Skills',     icon: '🏅' },
+  { id: 6, label: 'Hobbies',   icon: '🎯' },
+];
+
+const HOBBIES_LIST = [
+  'Reading', 'Photography', 'Gaming', 'Cooking', 'Travelling',
+  'Fitness', 'Music', 'Drawing', 'Dancing', 'Blogging',
+  'Volunteering', 'Chess', 'Coding', 'Swimming', 'Football',
+];
 
 export default function CVBuilderScreen() {
   const { profile } = useAuthStore();
   const [currentStep, setCurrentStep] = useState(0);
   const [selectedTemplate, setSelectedTemplate] = useState('1');
   const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
+  const [selectedHobbies, setSelectedHobbies] = useState<string[]>([]);
   const [targetRole, setTargetRole] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [generated, setGenerated] = useState(false);
+  const [generatedAt, setGeneratedAt] = useState<string | null>(null);
+
+  // Load existing CV profile on mount
+  useEffect(() => {
+    if (!profile?.id) return;
+    supabase
+      .from('cv_profiles')
+      .select('template_id, skills, hobbies, target_role, generated_at')
+      .eq('student_id', profile.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data) {
+          if (data.template_id) setSelectedTemplate(data.template_id);
+          if (data.skills?.length) setSelectedSkills(data.skills);
+          if (data.hobbies?.length) setSelectedHobbies(data.hobbies);
+          if (data.target_role) setTargetRole(data.target_role);
+          if (data.generated_at) {
+            setGeneratedAt(data.generated_at);
+            setGenerated(true);
+          }
+        }
+      });
+  }, [profile?.id]);
+
+  const toggleHobby = (h: string) =>
+    setSelectedHobbies((prev) =>
+      prev.includes(h) ? prev.filter((x) => x !== h) : [...prev, h]
+    );
 
   const toggleSkill = (skill: string) => {
     setSelectedSkills((prev) =>
@@ -34,10 +79,32 @@ export default function CVBuilderScreen() {
   };
 
   const handleGenerate = async () => {
+    if (!profile?.id) return;
     setIsGenerating(true);
-    await new Promise((r) => setTimeout(r, 2500));
+
+    const now = new Date().toISOString();
+
+    const { error } = await supabase.from('cv_profiles').upsert(
+      {
+        student_id: profile.id,
+        template_id: selectedTemplate,
+        skills: selectedSkills,
+        hobbies: selectedHobbies,
+        target_role: targetRole || null,
+        generated_at: now,
+        updated_at: now,
+      },
+      { onConflict: 'student_id' }
+    );
+
     setIsGenerating(false);
-    setGenerated(true);
+
+    if (error) {
+      Alert.alert('Save Failed', error.message);
+    } else {
+      setGeneratedAt(now);
+      setGenerated(true);
+    }
   };
 
   const formatNaira = (n: number) => `₦${n.toLocaleString('en-NG')}`;
@@ -110,41 +177,55 @@ export default function CVBuilderScreen() {
             Let AI build a personalized CV from your academic profile
           </Text>
 
-          {/* Step Indicator */}
-          <View style={styles.stepRow}>
-            {STEPS.map((step, i) => (
-              <React.Fragment key={step}>
-                <TouchableOpacity
-                  style={[styles.stepDot, i <= currentStep && styles.stepDotActive]}
-                  onPress={() => setCurrentStep(i)}
-                >
-                  <Text style={[styles.stepDotText, i <= currentStep && styles.stepDotTextActive]}>
-                    {i + 1}
-                  </Text>
-                </TouchableOpacity>
-                {i < STEPS.length - 1 && (
-                  <View style={[styles.stepLine, i < currentStep && styles.stepLineActive]} />
-                )}
-              </React.Fragment>
+          {/* Section Grid */}
+          <View style={styles.sectionGrid}>
+            {SECTIONS.map((sec) => (
+              <TouchableOpacity
+                key={sec.id}
+                style={[styles.sectionTile, currentStep === sec.id && styles.sectionTileActive]}
+                onPress={() => setCurrentStep(sec.id)}
+              >
+                <Text style={styles.sectionTileIcon}>{sec.icon}</Text>
+                <Text style={[styles.sectionTileLabel, currentStep === sec.id && styles.sectionTileLabelActive]}>
+                  {sec.label}
+                </Text>
+              </TouchableOpacity>
             ))}
           </View>
-          <Text style={styles.stepLabel}>{STEPS[currentStep]}</Text>
 
           {/* Step Content */}
           {currentStep === 0 && (
             <View style={styles.stepContent}>
-              <Text style={styles.stepContentTitle}>Profile Auto-filled</Text>
+              <Text style={styles.stepContentTitle}>Personal Information</Text>
               {[
                 { label: 'Full Name', value: `${profile?.first_name ?? 'Adebayo'} ${profile?.last_name ?? 'Okafor'}` },
-                { label: 'Department', value: profile?.department ?? 'Computer Science' },
-                { label: 'Level', value: profile?.level ?? '300L' },
-                { label: 'Matric Number', value: profile?.matric_number ?? 'RUN/CPS/22/00123' },
+                { label: 'Email',     value: profile?.email ?? 'student@run.edu.ng' },
+                { label: 'Phone',     value: profile?.phone ?? 'Not set' },
+                { label: 'Department',value: profile?.department ?? 'Computer Science' },
+                { label: 'Level',     value: profile?.level ?? '300L' },
+                { label: 'LinkedIn',  value: profile?.linkedin_url ?? 'Not set' },
+                { label: 'Portfolio', value: profile?.portfolio_url ?? 'Not set' },
               ].map((field) => (
                 <View key={field.label} style={styles.profileField}>
                   <Text style={styles.profileFieldLabel}>{field.label}</Text>
-                  <Text style={styles.profileFieldValue}>{field.value}</Text>
+                  <Text
+                    style={[
+                      styles.profileFieldValue,
+                      field.value === 'Not set' && styles.profileFieldMissing,
+                    ]}
+                    numberOfLines={1}
+                    ellipsizeMode="tail"
+                  >
+                    {field.value}
+                  </Text>
                 </View>
               ))}
+              <View style={styles.profileBioField}>
+                <Text style={styles.profileFieldLabel}>Bio</Text>
+                <Text style={[styles.profileBioValue, !profile?.bio && styles.profileFieldMissing]}>
+                  {profile?.bio ?? 'No bio added yet. Add one from your profile to strengthen your CV.'}
+                </Text>
+              </View>
             </View>
           )}
 
@@ -167,43 +248,90 @@ export default function CVBuilderScreen() {
             </View>
           )}
 
+          {currentStep === 1 && (
+            <View style={styles.stepContent}>
+              <Text style={styles.stepContentTitle}>Professional Summary</Text>
+              <Text style={styles.stepContentSub}>A brief overview that will appear at the top of your CV.</Text>
+              <View style={styles.summaryBox}>
+                <Text style={styles.summaryPlaceholder}>
+                  {profile?.bio
+                    ? profile.bio
+                    : 'e.g. Motivated Computer Science student with a passion for software development and problem-solving…'}
+                </Text>
+              </View>
+            </View>
+          )}
+
           {currentStep === 2 && (
             <View style={styles.stepContent}>
-              <Text style={styles.stepContentTitle}>Target Role</Text>
-              <Text style={styles.stepContentSub}>What kind of internship are you applying for?</Text>
-              {['Software Developer', 'UI/UX Designer', 'Data Analyst', 'Marketing Intern', 'Accountant', 'Engineer'].map((role) => (
-                <TouchableOpacity
-                  key={role}
-                  style={[styles.roleOption, targetRole === role && styles.roleOptionActive]}
-                  onPress={() => setTargetRole(role)}
-                >
-                  <Text style={[styles.roleOptionText, targetRole === role && styles.roleOptionTextActive]}>
-                    {role}
-                  </Text>
-                  {targetRole === role && <Text style={styles.roleCheck}>✓</Text>}
-                </TouchableOpacity>
-              ))}
+              <Text style={styles.stepContentTitle}>Education</Text>
+              <View style={styles.entryCard}>
+                <Text style={styles.entryTitle}>Redeemer's University</Text>
+                <Text style={styles.entrySub}>{profile?.department ?? 'Computer Science'} · {profile?.level ?? '300L'}</Text>
+                <Text style={styles.entryDate}>2022 – Present</Text>
+              </View>
+              <TouchableOpacity style={styles.addEntryBtn}>
+                <Text style={styles.addEntryText}>+ Add Another</Text>
+              </TouchableOpacity>
             </View>
           )}
 
           {currentStep === 3 && (
             <View style={styles.stepContent}>
-              <Text style={styles.stepContentTitle}>Your Preferences</Text>
-              {[
-                { label: 'Work Type', options: ['Remote', 'Onsite', 'Hybrid'] },
-                { label: 'Location', options: ['Lagos', 'Abuja', 'Remote', 'Anywhere'] },
-              ].map((group) => (
-                <View key={group.label} style={styles.prefGroup}>
-                  <Text style={styles.prefGroupLabel}>{group.label}</Text>
-                  <View style={styles.prefOptions}>
-                    {group.options.map((opt) => (
-                      <TouchableOpacity key={opt} style={styles.prefChip}>
-                        <Text style={styles.prefChipText}>{opt}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </View>
-              ))}
+              <Text style={styles.stepContentTitle}>Work Experience</Text>
+              <Text style={styles.stepContentSub}>Add internships or part-time roles you've held.</Text>
+              <TouchableOpacity style={styles.addEntryBtn}>
+                <Text style={styles.addEntryText}>+ Add Experience</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {currentStep === 4 && (
+            <View style={styles.stepContent}>
+              <Text style={styles.stepContentTitle}>Projects</Text>
+              <Text style={styles.stepContentSub}>Showcase personal or academic projects.</Text>
+              <TouchableOpacity style={styles.addEntryBtn}>
+                <Text style={styles.addEntryText}>+ Add Project</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {currentStep === 5 && (
+            <View style={styles.stepContent}>
+              <Text style={styles.stepContentTitle}>Skills</Text>
+              <View style={styles.skillsGrid}>
+                {SKILLS_LIST.slice(0, 20).map((skill) => (
+                  <TouchableOpacity
+                    key={skill}
+                    style={[styles.skillChip, selectedSkills.includes(skill) && styles.skillChipActive]}
+                    onPress={() => toggleSkill(skill)}
+                  >
+                    <Text style={[styles.skillChipText, selectedSkills.includes(skill) && styles.skillChipTextActive]}>
+                      {skill}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          )}
+
+          {currentStep === 6 && (
+            <View style={styles.stepContent}>
+              <Text style={styles.stepContentTitle}>Hobbies & Interests</Text>
+              <Text style={styles.stepContentSub}>Select activities that reflect your personality.</Text>
+              <View style={styles.skillsGrid}>
+                {HOBBIES_LIST.map((h) => (
+                  <TouchableOpacity
+                    key={h}
+                    style={[styles.skillChip, selectedHobbies.includes(h) && styles.skillChipActive]}
+                    onPress={() => toggleHobby(h)}
+                  >
+                    <Text style={[styles.skillChipText, selectedHobbies.includes(h) && styles.skillChipTextActive]}>
+                      {h}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
             </View>
           )}
 
@@ -214,7 +342,7 @@ export default function CVBuilderScreen() {
                 <Text style={styles.prevBtnText}>← Back</Text>
               </TouchableOpacity>
             )}
-            {currentStep < STEPS.length - 1 ? (
+            {currentStep < SECTIONS.length - 1 ? (
               <TouchableOpacity style={styles.nextStepBtn} onPress={() => setCurrentStep((s) => s + 1)}>
                 <LinearGradient
                   colors={[Colors.light.accentBlue, Colors.light.primaryBlue]}
@@ -248,13 +376,18 @@ export default function CVBuilderScreen() {
             <View style={styles.cvPreview}>
               <View style={styles.cvPreviewHeader}>
                 <Text style={styles.cvPreviewSuccess}>✅ CV Generated!</Text>
+                {generatedAt && (
+                  <Text style={styles.cvPreviewDate}>
+                    {new Date(generatedAt).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' })}
+                  </Text>
+                )}
               </View>
               <View style={styles.cvMock}>
                 <View style={styles.cvMockHeader}>
                   <Text style={styles.cvMockName}>{profile?.first_name ?? 'Adebayo'} {profile?.last_name ?? 'Okafor'}</Text>
                   <Text style={styles.cvMockTitle}>{targetRole || 'Software Developer'} Intern</Text>
                 </View>
-                {['Education', 'Skills', 'Projects', 'References'].map((section) => (
+                {['Summary', 'Education', 'Experience', 'Projects', 'Skills', 'Hobbies'].map((section) => (
                   <View key={section} style={styles.cvMockSection}>
                     <View style={styles.cvMockSectionBar} />
                     <Text style={styles.cvMockSectionTitle}>{section}</Text>
@@ -329,18 +462,44 @@ const styles = StyleSheet.create({
   templateTag: { ...Typography.micro, color: Colors.light.textMuted, marginBottom: 8 },
   templatePrice: { fontFamily: 'DMSans_700Bold', fontSize: 14, color: Colors.light.primaryBlue },
   aiSection: { borderTopWidth: 1, borderTopColor: Colors.light.borderLight, paddingTop: 8 },
-  aiSubtitle: { ...Typography.body, color: Colors.light.textMuted, paddingHorizontal: 20, marginBottom: 24 },
-  stepRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, marginBottom: 8 },
-  stepDot: {
-    width: 32, height: 32, borderRadius: 16, backgroundColor: Colors.light.border,
-    justifyContent: 'center', alignItems: 'center',
+  aiSubtitle: { ...Typography.body, color: Colors.light.textMuted, paddingHorizontal: 20, marginBottom: 16 },
+  sectionGrid: {
+    flexDirection: 'row', flexWrap: 'wrap', gap: 10,
+    paddingHorizontal: 20, marginBottom: 20,
   },
-  stepDotActive: { backgroundColor: Colors.light.primaryBlue },
-  stepDotText: { fontFamily: 'DMSans_700Bold', fontSize: 13, color: Colors.light.textMuted },
-  stepDotTextActive: { color: '#FFFFFF' },
-  stepLine: { flex: 1, height: 2, backgroundColor: Colors.light.border },
-  stepLineActive: { backgroundColor: Colors.light.primaryBlue },
-  stepLabel: { ...Typography.labelSemiBold, color: Colors.light.textMuted, paddingHorizontal: 20, marginBottom: 20 },
+  sectionTile: {
+    width: '47%', flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: Colors.light.surfaceGrey, borderRadius: 12,
+    paddingVertical: 13, paddingHorizontal: 14,
+    borderWidth: 1.5, borderColor: Colors.light.cardBorder,
+  },
+  sectionTileActive: {
+    backgroundColor: Colors.light.lightBlue,
+    borderColor: Colors.light.primaryBlue,
+  },
+  sectionTileIcon: { fontSize: 16 },
+  sectionTileLabel: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: Colors.light.textMuted },
+  sectionTileLabelActive: { fontFamily: 'DMSans_600SemiBold', color: Colors.light.primaryBlue },
+  summaryBox: {
+    backgroundColor: Colors.light.white, borderRadius: 10,
+    borderWidth: 1, borderColor: Colors.light.border,
+    padding: 14, minHeight: 90,
+  },
+  summaryPlaceholder: { ...Typography.body, color: Colors.light.textMuted, lineHeight: 22 },
+  entryCard: {
+    backgroundColor: Colors.light.white, borderRadius: 10,
+    borderWidth: 1, borderColor: Colors.light.border,
+    padding: 14, marginBottom: 10,
+  },
+  entryTitle: { fontFamily: 'DMSans_600SemiBold', fontSize: 14, color: Colors.light.textDark },
+  entrySub: { ...Typography.body, color: Colors.light.textMuted, marginTop: 2 },
+  entryDate: { ...Typography.micro, color: Colors.light.accentBlue, marginTop: 4 },
+  addEntryBtn: {
+    paddingVertical: 12, borderRadius: 10,
+    borderWidth: 1.5, borderColor: Colors.light.primaryBlue,
+    borderStyle: 'dashed', alignItems: 'center',
+  },
+  addEntryText: { fontFamily: 'DMSans_600SemiBold', fontSize: 13, color: Colors.light.primaryBlue },
   stepContent: {
     marginHorizontal: 20, backgroundColor: Colors.light.surfaceGrey,
     borderRadius: Radii.card, padding: 16, marginBottom: 20,
@@ -352,7 +511,12 @@ const styles = StyleSheet.create({
     paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: Colors.light.borderLight,
   },
   profileFieldLabel: { ...Typography.label, color: Colors.light.textMuted },
-  profileFieldValue: { ...Typography.bodyMedium, color: Colors.light.textDark },
+  profileFieldValue: { ...Typography.bodyMedium, color: Colors.light.textDark, maxWidth: '60%', textAlign: 'right' },
+  profileFieldMissing: { color: Colors.light.textMuted, fontStyle: 'italic' },
+  profileBioField: {
+    paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: Colors.light.borderLight,
+  },
+  profileBioValue: { ...Typography.body, color: Colors.light.textDark, marginTop: 4, lineHeight: 20 },
   skillsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   skillChip: {
     paddingHorizontal: 12, paddingVertical: 6, borderRadius: 50,
@@ -397,6 +561,7 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: Radii.card, borderTopRightRadius: Radii.card,
   },
   cvPreviewSuccess: { fontFamily: 'DMSans_600SemiBold', fontSize: 15, color: Colors.light.success },
+  cvPreviewDate: { ...Typography.micro, color: Colors.light.textMuted, marginTop: 2 },
   cvMock: {
     backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: Colors.light.cardBorder,
     padding: 20,
