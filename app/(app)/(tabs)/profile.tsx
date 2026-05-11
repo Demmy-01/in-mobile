@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIndicator,
+  Image, ImageBackground,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -149,11 +150,21 @@ export default function ProfileScreen() {
       <ScrollView showsVerticalScrollIndicator={false}>
 
         {/* ── Header ── */}
-        <LinearGradient
-          colors={[C.primaryBlue, C.accentBlue]}
+        <ImageBackground
+          source={profile?.cover_url ? { uri: profile.cover_url } : undefined}
           style={styles.headerGradient}
-          start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+          imageStyle={{ resizeMode: 'cover' }}
         >
+          {/* Blue gradient tint always on top — acts as filter over cover photo */}
+          <LinearGradient
+            colors={[
+              profile?.cover_url ? 'rgba(26,86,219,0.80)' : C.primaryBlue,
+              profile?.cover_url ? 'rgba(59,130,246,0.85)' : C.accentBlue,
+            ]}
+            style={StyleSheet.absoluteFill}
+            start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+          />
+
           <TouchableOpacity style={styles.editBtn} onPress={() => setEditVisible(true)}>
             <Pencil size={13} color="#fff" />
             <Text style={styles.editBtnText}>Edit</Text>
@@ -161,40 +172,64 @@ export default function ProfileScreen() {
 
           <View style={styles.avatarContainer}>
             <View style={styles.avatar}>
-              <Text style={styles.avatarText}>{firstName.charAt(0).toUpperCase()}</Text>
+              {profile?.avatar_url ? (
+                <Image
+                  source={{ uri: profile.avatar_url }}
+                  style={styles.avatarImage}
+                />
+              ) : (
+                <Text style={styles.avatarText}>{firstName.charAt(0).toUpperCase()}</Text>
+              )}
             </View>
           </View>
 
           <Text style={styles.profileName}>{firstName} {lastName}</Text>
           <Text style={styles.profileDept}>{department}</Text>
+        </ImageBackground>
 
-          <View style={styles.profileMeta}>
-            <View style={styles.metaBadge}>
-              <Text style={styles.metaBadgeText}>{level}</Text>
+        {/* ── About Card ── */}
+        <View style={styles.aboutCard}>
+          {/* Level & Matric row */}
+          <View style={styles.aboutRow}>
+            <View style={styles.aboutItem}>
+              <Text style={styles.aboutItemLabel}>Level</Text>
+              <Text style={styles.aboutItemValue}>{level}</Text>
             </View>
-            <View style={styles.metaDot} />
-            <Text style={styles.metaText}>{matric}</Text>
+            <View style={styles.aboutDividerV} />
+            <View style={styles.aboutItem}>
+              <Text style={styles.aboutItemLabel}>Matric No.</Text>
+              <Text style={styles.aboutItemValue} numberOfLines={1}>{matric}</Text>
+            </View>
           </View>
 
+          {/* Bio */}
           {bio ? (
-            <Text style={styles.profileBio} numberOfLines={2}>{bio}</Text>
+            <>
+              <View style={styles.aboutSeparator} />
+              <View style={styles.aboutBioSection}>
+                <Text style={styles.aboutSectionLabel}>About</Text>
+                <Text style={styles.aboutBioText}>{bio}</Text>
+              </View>
+            </>
           ) : null}
 
+          {/* Skills */}
           {skills.length > 0 && (
-            <View style={styles.skillsRow}>
-              {skills.slice(0, 4).map((sk) => (
-                <View key={sk} style={styles.skillChip}>
-                  <Text style={styles.skillChipText}>{sk}</Text>
+            <>
+              <View style={styles.aboutSeparator} />
+              <View style={styles.aboutBioSection}>
+                <Text style={styles.aboutSectionLabel}>Skills</Text>
+                <View style={styles.skillsRow}>
+                  {skills.map((sk) => (
+                    <View key={sk} style={styles.skillChip}>
+                      <Text style={styles.skillChipText}>{sk}</Text>
+                    </View>
+                  ))}
                 </View>
-              ))}
-              {skills.length > 4 && (
-                <View style={styles.skillChip}>
-                  <Text style={styles.skillChipText}>+{skills.length - 4}</Text>
-                </View>
-              )}
-            </View>
+              </View>
+            </>
           )}
-        </LinearGradient>
+        </View>
 
         {/* ── Completion Bar ── */}
         <View style={styles.completionCard}>
@@ -404,26 +439,39 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: C.background },
 
   // Header
-  headerGradient: { paddingTop: 20, paddingBottom: 32, paddingHorizontal: 20, alignItems: 'center', position: 'relative' },
-  editBtn: { position: 'absolute', top: 20, right: 20, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 7 },
+  headerGradient: { paddingTop: 20, paddingBottom: 48, paddingHorizontal: 20, alignItems: 'center', position: 'relative', overflow: 'hidden' },
+  editBtn: { position: 'absolute', top: 20, right: 20, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 7, zIndex: 2 },
   editBtnText: { fontFamily: 'DMSans_600SemiBold', fontSize: 13, color: '#fff' },
-  avatarContainer: { marginBottom: 12 },
-  avatar: { width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.25)', justifyContent: 'center', alignItems: 'center', borderWidth: 3, borderColor: '#fff' },
-  avatarText: { fontFamily: 'DMSans_700Bold', fontSize: 32, color: '#fff' },
-  profileName: { fontFamily: 'Fraunces_700Bold', fontSize: 24, color: '#fff', marginBottom: 4 },
-  profileDept: { ...Typography.body, color: 'rgba(255,255,255,0.8)', marginBottom: 12 },
-  profileMeta: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
-  metaBadge: { backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 4 },
-  metaBadgeText: { fontFamily: 'DMSans_600SemiBold', fontSize: 12, color: '#fff' },
-  metaDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.5)' },
-  metaText: { ...Typography.label, color: 'rgba(255,255,255,0.8)' },
-  profileBio: { ...Typography.body, color: 'rgba(255,255,255,0.75)', textAlign: 'center', marginTop: 6, maxWidth: 300 },
-  skillsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 12, justifyContent: 'center' },
-  skillChip: { backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 4 },
-  skillChipText: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: '#fff' },
+  avatarContainer: { marginBottom: 14, zIndex: 1 },
+  avatar: { width: 88, height: 88, borderRadius: 44, backgroundColor: 'rgba(255,255,255,0.25)', justifyContent: 'center', alignItems: 'center', borderWidth: 3, borderColor: '#fff', overflow: 'hidden' },
+  avatarImage: { width: '100%', height: '100%', resizeMode: 'cover' },
+  avatarText: { fontFamily: 'DMSans_700Bold', fontSize: 36, color: '#fff' },
+  profileName: { fontFamily: 'Fraunces_700Bold', fontSize: 24, color: '#fff', marginBottom: 6, textAlign: 'center', zIndex: 1 },
+  profileDept: { ...Typography.body, color: 'rgba(255,255,255,0.8)', textAlign: 'center', zIndex: 1 },
+
+  // About card (floats over header bottom)
+  aboutCard: {
+    marginHorizontal: 20, marginTop: -26,
+    backgroundColor: C.white, borderRadius: Radii.card,
+    borderWidth: 1, borderColor: C.cardBorder,
+    overflow: 'hidden', marginBottom: 16,
+    shadowColor: '#000', shadowOpacity: 0.07, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 4,
+  },
+  aboutRow: { flexDirection: 'row', alignItems: 'center' },
+  aboutItem: { flex: 1, alignItems: 'center', paddingVertical: 18 },
+  aboutItemLabel: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: C.textMuted, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 },
+  aboutItemValue: { fontFamily: 'DMSans_700Bold', fontSize: 15, color: C.textDark },
+  aboutDividerV: { width: 1, height: 40, backgroundColor: C.borderLight },
+  aboutSeparator: { height: 1, backgroundColor: C.borderLight, marginHorizontal: 16 },
+  aboutBioSection: { paddingHorizontal: 18, paddingVertical: 16, gap: 8 },
+  aboutSectionLabel: { fontFamily: 'DMSans_600SemiBold', fontSize: 12, color: C.textMuted, textTransform: 'uppercase', letterSpacing: 0.6 },
+  aboutBioText: { ...Typography.body, color: C.textDark, lineHeight: 22 },
+  skillsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  skillChip: { backgroundColor: C.lightBlue, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 5 },
+  skillChipText: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: C.primaryBlue },
 
   // Completion
-  completionCard: { marginHorizontal: 20, marginTop: -20, backgroundColor: C.white, borderRadius: Radii.card, padding: 18, borderWidth: 1, borderColor: C.cardBorder, marginBottom: 16 },
+  completionCard: { marginHorizontal: 20, marginTop: 0, backgroundColor: C.white, borderRadius: Radii.card, padding: 18, borderWidth: 1, borderColor: C.cardBorder, marginBottom: 16 },
   completionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
   completionTitle: { fontFamily: 'DMSans_600SemiBold', fontSize: 14, color: C.textDark },
   completionPct: { fontFamily: 'DMSans_700Bold', fontSize: 16, color: C.accentBlue },

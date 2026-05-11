@@ -12,7 +12,7 @@ import { supabase } from '@/lib/supabase';
 export default function OtpScreen() {
   const router = useRouter();
   const { email, firstName } = useLocalSearchParams<{ email: string; firstName: string }>();
-  const [otp, setOtp] = useState(['', '', '', '', '', '']);
+  const [otp, setOtp] = useState(['', '', '', '', '', '', '', '']);
   const [isLoading, setIsLoading] = useState(false);
   const [countdown, setCountdown] = useState(59);
   const [canResend, setCanResend] = useState(false);
@@ -28,13 +28,13 @@ export default function OtpScreen() {
     const newOtp = [...otp];
     newOtp[index] = text.slice(-1);
     setOtp(newOtp);
-    if (text && index < 5) inputRefs.current[index + 1]?.focus();
+    if (text && index < 7) inputRefs.current[index + 1]?.focus();
     if (!text && index > 0) inputRefs.current[index - 1]?.focus();
   };
 
   const handleVerify = async () => {
     const code = otp.join('');
-    if (code.length < 6) { Alert.alert('Enter 6-digit code'); return; }
+    if (code.length < 8) { Alert.alert('Enter 8-digit code'); return; }
     setIsLoading(true);
     const { error } = await supabase.auth.verifyOtp({
       email: email!, token: code, type: 'signup',
@@ -69,7 +69,7 @@ export default function OtpScreen() {
 
         <Text style={styles.title}>Check your email</Text>
         <Text style={styles.subtitle}>
-          We sent a 6-digit verification code to{'\n'}
+          We sent an 8-digit verification code to{'\n'}
           <Text style={styles.emailHighlight}>{email}</Text>
         </Text>
 
@@ -129,9 +129,9 @@ const styles = StyleSheet.create({
   emailHighlight: { ...Typography.bodyMedium, color: Colors.light.textDark },
   otpRow: { flexDirection: 'row', gap: 10, marginTop: 36 },
   otpCell: {
-    width: 48, height: 56, borderRadius: 12, borderWidth: 1.5,
+    width: 38, height: 52, borderRadius: 12, borderWidth: 1.5,
     borderColor: Colors.light.inputBorder, backgroundColor: Colors.light.inputBg,
-    textAlign: 'center', fontSize: 22, fontFamily: 'DMSans_700Bold', color: Colors.light.textDark,
+    textAlign: 'center', fontSize: 20, fontFamily: 'DMSans_700Bold', color: Colors.light.textDark,
   },
   otpCellFilled: { borderColor: Colors.light.accentBlue, backgroundColor: Colors.light.lightBlue },
   timerRow: { marginTop: 20, marginBottom: 40 },

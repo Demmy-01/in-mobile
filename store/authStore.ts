@@ -17,6 +17,7 @@ export interface StudentProfile {
   linkedin_url?: string;
   portfolio_url?: string;
   avatar_url?: string;
+  cover_url?: string;
   gpa?: number;
   created_at: string;
   updated_at: string;
