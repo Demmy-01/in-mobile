@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, FlatList, ActivityIndicator, RefreshControl,
+  TextInput, FlatList, ActivityIndicator, RefreshControl, Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -12,13 +12,15 @@ import { useAuthStore } from '@/store/authStore';
 import {
   INTERNSHIP_CATEGORIES, formatNairaRange, getGreeting,
 } from '@/constants/AppData';
-import { Search, SlidersHorizontal, MapPin, Clock, Bookmark } from 'lucide-react-native';
+import { Search, SlidersHorizontal, MapPin, Clock, Bookmark, SearchX } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
+import { evaluateInternshipMatches } from '@/lib/nvidia';
 
 // ---- Types ----
 interface Listing {
   id: string;
   title: string;
+  description: string;
   location: string | null;
   salary_min: number | null;
   salary_max: number | null;
@@ -32,14 +34,108 @@ interface Listing {
   } | null;
 }
 
-// Compute a simple match score based on overlapping skills
-function computeMatch(listing: Listing, profileSkills: string[]): number {
-  if (!listing.required_skills?.length || !profileSkills?.length) return 70;
-  const required = listing.required_skills.map((s) => s.toLowerCase());
-  const has = profileSkills.map((s) => s.toLowerCase());
-  const overlap = required.filter((r) => has.includes(r)).length;
-  return Math.min(99, Math.round(70 + (overlap / required.length) * 29));
+// ── Semantic skill synonym map ──────────────────────────────────────────────
+// Maps common skill variants to a canonical group, so "ReactJS" matches "React"
+const SKILL_SYNONYMS: Record<string, string[]> = {
+  javascript: ['js', 'es6', 'es2015', 'node', 'nodejs', 'typescript', 'ts'],
+  react:      ['reactjs', 'react.js', 'react native', 'nextjs', 'next.js'],
+  python:     ['django', 'flask', 'fastapi', 'pandas', 'numpy', 'pytorch', 'tensorflow'],
+  design:     ['ui', 'ux', 'ui/ux', 'figma', 'adobe xd', 'sketch', 'canva', 'illustrator'],
+  frontend:   ['html', 'css', 'sass', 'tailwind', 'bootstrap', 'vue', 'angular', 'svelte'],
+  backend:    ['api', 'rest', 'graphql', 'sql', 'database', 'postgres', 'mysql', 'mongodb'],
+  mobile:     ['android', 'ios', 'flutter', 'swift', 'kotlin', 'expo'],
+  data:       ['excel', 'power bi', 'tableau', 'analytics', 'machine learning', 'ml', 'ai'],
+  marketing:  ['seo', 'sem', 'social media', 'content', 'copywriting', 'ads', 'campaigns'],
+  finance:    ['accounting', 'bookkeeping', 'financial analysis', 'excel', 'quickbooks'],
+};
+
+// Checks if two skill strings are semantically equivalent
+function skillsMatch(a: string, b: string): boolean {
+  if (a.includes(b) || b.includes(a)) return true;
+  for (const [, synonyms] of Object.entries(SKILL_SYNONYMS)) {
+    if (synonyms.some(s => a.includes(s)) && synonyms.some(s => b.includes(s))) return true;
+  }
+  return false;
 }
+
+// Department-to-role keyword map
+const DEPT_ROLE_MAP: Record<string, string[]> = {
+  'computer science':       ['software', 'developer', 'engineer', 'frontend', 'backend', 'fullstack', 'data', 'mobile', 'web', 'tech'],
+  'information technology': ['it', 'support', 'network', 'systems', 'cloud', 'security', 'devops', 'tech'],
+  'electrical engineering': ['hardware', 'embedded', 'electronics', 'iot', 'circuit', 'automation', 'control'],
+  'mechanical engineering': ['cad', 'manufacturing', 'production', 'design', 'maintenance', 'fabrication'],
+  'business administration':['management', 'operations', 'strategy', 'admin', 'business', 'project'],
+  'accounting':             ['finance', 'audit', 'tax', 'accounting', 'bookkeeping', 'financial'],
+  'economics':              ['research', 'analysis', 'finance', 'policy', 'data', 'economics'],
+  'mass communication':     ['media', 'journalism', 'content', 'pr', 'marketing', 'communications', 'social media'],
+  'marketing':              ['marketing', 'brand', 'sales', 'digital', 'content', 'advertising', 'campaigns'],
+  'law':                    ['legal', 'compliance', 'contract', 'corporate', 'counsel', 'paralegal'],
+  'medicine':               ['health', 'medical', 'clinical', 'research', 'pharma', 'biotech'],
+};
+
+/**
+ * Multi-factor weighted local match score (runs instantly, no network).
+ * Scoring breakdown (max 99):
+ *   Skills match (direct + semantic)  → up to 40 pts
+ *   Department ↔ role alignment       → up to 25 pts
+ *   Bio / description keyword match   → up to 15 pts
+ *   Skills mentioned in job text      → up to 10 pts
+ *   Base score (everyone gets this)   →      9 pts
+ */
+function computeLocalMatch(
+  listing: Listing,
+  profile: { skills: string[]; department: string; bio?: string }
+): number {
+  const titleLower = (listing.title || '').toLowerCase();
+  const deptLower  = (profile.department || '').toLowerCase();
+  const pSkills    = (profile.skills || []).map(s => s.toLowerCase());
+  const rSkills    = (listing.required_skills || []).map(s => s.toLowerCase());
+  const descLower  = (listing.description || '').toLowerCase();
+  const bioLower   = (profile.bio || '').toLowerCase();
+  const allJobText = `${titleLower} ${descLower}`;
+
+  let score = 9; // base — everyone gets this
+
+  // ── 1. Skills match (up to 40 pts) ──────────────────────────────────────
+  if (rSkills.length > 0 && pSkills.length > 0) {
+    const matched = rSkills.filter(r => pSkills.some(p => skillsMatch(p, r))).length;
+    score += Math.round((matched / rSkills.length) * 40);
+  } else if (pSkills.length > 0) {
+    // No required_skills set — check profile skills against job text
+    const matched = pSkills.filter(s => allJobText.includes(s)).length;
+    score += Math.min(20, matched * 7);
+  }
+
+  // ── 2. Department ↔ role alignment (up to 25 pts) ───────────────────────
+  let deptScore = 0;
+  // Exact department word in title/desc
+  const deptWords = deptLower.split(/[\s/]+/).filter(w => w.length > 3);
+  for (const w of deptWords) {
+    if (allJobText.includes(w)) deptScore = Math.max(deptScore, 15);
+  }
+  // Semantic department → role mapping
+  for (const [deptKey, roleKeywords] of Object.entries(DEPT_ROLE_MAP)) {
+    if (deptLower.includes(deptKey)) {
+      const overlap = roleKeywords.filter(kw => allJobText.includes(kw)).length;
+      deptScore = Math.max(deptScore, Math.min(25, overlap * 8));
+    }
+  }
+  score += deptScore;
+
+  // ── 3. Bio keyword match (up to 15 pts) ─────────────────────────────────
+  if (bioLower.length > 10) {
+    const bioWords = bioLower.split(/\s+/).filter(w => w.length > 4);
+    const bioMatches = bioWords.filter(w => allJobText.includes(w)).length;
+    score += Math.min(15, bioMatches * 3);
+  }
+
+  // ── 4. Profile skills appear in job text (up to 10 pts) ─────────────────
+  const skillsInText = pSkills.filter(s => allJobText.includes(s)).length;
+  score += Math.min(10, skillsInText * 4);
+
+  return Math.min(99, Math.max(9, score));
+}
+
 
 const GRADIENTS: [string, string][] = [
   ['#1A3A6B', '#2D6BE4'],
@@ -57,8 +153,12 @@ export default function HomeScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
+  const [aiMatchScores, setAiMatchScores] = useState<Record<string, number>>({});
+  const [aiStatus, setAiStatus] = useState<'idle' | 'loading' | 'success' | 'failed'>('idle');
+  const aiMatchFiredRef = useRef(false); // prevent double-fire
 
   const firstName = profile?.first_name ?? 'Student';
+  const avatarUrl = profile?.avatar_url ?? null;
   const greeting = getGreeting();
   const profileSkills = profile?.skills ?? [];
 
@@ -73,6 +173,59 @@ export default function HomeScreen() {
       setListings(data as Listing[]);
     }
   }, []);
+
+  // AI match effect — fires once when we have both listings AND profile
+  useEffect(() => {
+    if (aiMatchFiredRef.current) return;
+    if (!profile || listings.length === 0) return;
+
+    aiMatchFiredRef.current = true;
+    setAiStatus('loading');
+
+    const profileForLocal = { skills: profile.skills ?? [], department: profile.department ?? '', bio: profile.bio };
+
+    // Score all listings locally right now (instant, no spinner needed)
+    const localScores: Record<string, number> = {};
+    for (const l of listings) {
+      localScores[l.id] = computeLocalMatch(l, profileForLocal);
+    }
+    setAiMatchScores(localScores);
+
+    // Sort top 10 by local score to send to AI
+    const top10 = [...listings]
+      .sort((a, b) => (localScores[b.id] ?? 0) - (localScores[a.id] ?? 0))
+      .slice(0, 10);
+
+    evaluateInternshipMatches(
+      {
+        department: profile.department || '',
+        level: profile.level || '',
+        skills: profile.skills ?? [],
+        bio: profile.bio,
+      },
+      top10.map((l, idx) => ({
+        id: idx.toString(),
+        title: l.title,
+        description: l.description || '',
+        requirements: l.required_skills || [],
+      }))
+    )
+      .then(scores => {
+        const mappedScores: Record<string, number> = { ...localScores };
+        for (const [key, score] of Object.entries(scores)) {
+          const idx = parseInt(key, 10);
+          if (!isNaN(idx) && top10[idx]) {
+            mappedScores[top10[idx].id] = typeof score === 'number' ? score : parseInt(String(score), 10);
+          }
+        }
+        setAiMatchScores(mappedScores);
+        setAiStatus('success');
+      })
+      .catch(err => {
+        console.error('[AI Match] Error:', err);
+        setAiStatus('failed');
+      });
+  }, [profile, listings]);
 
   const fetchSaved = useCallback(async () => {
     if (!profile?.id) return;
@@ -117,8 +270,14 @@ export default function HomeScreen() {
     }
   };
 
-  // Derived sections
-  const withMatch = listings.map((l) => ({ ...l, match: computeMatch(l, profileSkills) }));
+  // Derived sections — use AI score if available, else smart local score
+  const profileForMatch = { skills: profileSkills, department: profile?.department ?? '', bio: profile?.bio };
+  const withMatch = listings.map((l) => ({
+    ...l,
+    match: aiMatchScores[l.id] !== undefined
+      ? aiMatchScores[l.id]
+      : computeLocalMatch(l, profileForMatch)
+  }));
   const featured = withMatch.slice(0, 3);
   const recommended = [...withMatch].sort((a, b) => b.match - a.match).slice(0, 6);
   const recent = withMatch.slice(0, 4);
@@ -160,14 +319,18 @@ export default function HomeScreen() {
             style={styles.avatarWrap}
             onPress={() => router.push('/(app)/(tabs)/profile')}
           >
-            <LinearGradient
-              colors={[Colors.light.accentBlue, Colors.light.primaryBlue]}
-              style={styles.avatar}
-            >
-              <Text style={styles.avatarText}>
-                {firstName.charAt(0).toUpperCase()}
-              </Text>
-            </LinearGradient>
+            {avatarUrl ? (
+              <Image source={{ uri: avatarUrl }} style={styles.avatar} resizeMode="cover" />
+            ) : (
+              <LinearGradient
+                colors={[Colors.light.accentBlue, Colors.light.primaryBlue]}
+                style={styles.avatar}
+              >
+                <Text style={styles.avatarText}>
+                  {firstName.charAt(0).toUpperCase()}
+                </Text>
+              </LinearGradient>
+            )}
             <View style={styles.notifBadge} />
           </TouchableOpacity>
         </View>
@@ -252,7 +415,11 @@ export default function HomeScreen() {
         {recommended.length > 0 && (
           <>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Recommended For You</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Text style={styles.sectionTitle}>Recommended For You</Text>
+                {aiStatus === 'loading' && <ActivityIndicator size="small" color={Colors.light.primaryBlue} />}
+                {aiStatus === 'failed' && <Text style={{ fontSize: 10, color: 'red' }}>AI Match Failed</Text>}
+              </View>
               <TouchableOpacity onPress={() => router.push('/(app)/(tabs)/search')}>
                 <Text style={styles.viewAll}>View All</Text>
               </TouchableOpacity>
@@ -269,7 +436,15 @@ export default function HomeScreen() {
                   >
                     <View style={styles.recHeader}>
                       <View style={styles.recLogo}>
-                        <Text style={styles.recLogoText}>{initials}</Text>
+                        {item.organisation_profiles?.logo_url ? (
+                          <Image
+                            source={{ uri: item.organisation_profiles.logo_url }}
+                            style={styles.recLogoImage}
+                            resizeMode="cover"
+                          />
+                        ) : (
+                          <Text style={styles.recLogoText}>{initials}</Text>
+                        )}
                       </View>
                       <View style={styles.recTopRight}>
                         <View style={styles.recMatchBadge}>
@@ -378,7 +553,7 @@ export default function HomeScreen() {
         {/* Empty state when no listings */}
         {listings.length === 0 && (
           <View style={styles.emptyState}>
-            <Text style={styles.emptyIcon}>🔍</Text>
+            <SearchX size={52} color={Colors.light.textMuted} />
             <Text style={styles.emptyTitle}>No listings yet</Text>
             <Text style={styles.emptyText}>Check back soon — organisations are adding internships.</Text>
           </View>
@@ -401,7 +576,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start',
     paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12,
   },
-  greeting: { fontFamily: 'DMSans_600SemiBold', fontSize: 18, color: Colors.light.textDark },
+  greeting: { fontFamily: 'DMSans_700Bold', fontSize: 18, color: Colors.light.textDark },
   greetingSub: { ...Typography.body, color: Colors.light.textMuted, marginTop: 2 },
   avatarWrap: { position: 'relative' },
   avatar: {
@@ -488,7 +663,9 @@ const styles = StyleSheet.create({
   recLogo: {
     width: 38, height: 38, borderRadius: 12,
     backgroundColor: Colors.light.lightBlue, justifyContent: 'center', alignItems: 'center',
+    overflow: 'hidden',
   },
+  recLogoImage: { width: 38, height: 38, borderRadius: 12 },
   recLogoText: { fontFamily: 'DMSans_700Bold', fontSize: 16, color: Colors.light.primaryBlue },
   recTopRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   recMatchBadge: {
@@ -551,7 +728,6 @@ const styles = StyleSheet.create({
 
   // Empty
   emptyState: { alignItems: 'center', paddingTop: 60, paddingHorizontal: 40, gap: 10 },
-  emptyIcon: { fontSize: 48 },
   emptyTitle: { fontFamily: 'DMSans_600SemiBold', fontSize: 18, color: Colors.light.textDark },
   emptyText: { ...Typography.body, color: Colors.light.textMuted, textAlign: 'center' },
 });

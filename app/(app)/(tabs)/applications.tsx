@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity, ScrollView, ActivityIndicator,
+  View, Text, StyleSheet, FlatList, TouchableOpacity, ScrollView, ActivityIndicator, Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/Colors';
@@ -9,7 +9,7 @@ import { Inbox, ChevronUp, ChevronDown } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/store/authStore';
 
-type AppStatus = 'All' | 'Pending' | 'Reviewed' | 'Accepted' | 'Rejected';
+type AppStatus = 'All' | 'Pending' | 'Reviewed' | 'Accepted' | 'Completed' | 'Rejected';
 
 interface Application {
   id: string;
@@ -28,6 +28,7 @@ const STATUS_COLORS: Record<string, string> = {
   Pending: '#F59E0B',
   Reviewed: Colors.light.accentBlue,
   Accepted: Colors.light.success,
+  Completed: '#6B7280', // Gray for completed
   Rejected: Colors.light.error,
 };
 
@@ -43,12 +44,19 @@ export default function ApplicationsScreen() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [applications, setApplications] = useState<Application[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const TABS: AppStatus[] = ['All', 'Pending', 'Reviewed', 'Accepted', 'Rejected'];
+  const TABS: AppStatus[] = ['All', 'Pending', 'Reviewed', 'Accepted', 'Completed', 'Rejected'];
 
-  const fetchApplications = useCallback(async () => {
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await fetchApplications(false);
+    setIsRefreshing(false);
+  };
+
+  const fetchApplications = useCallback(async (showLoading = true) => {
     if (!profile?.id) return;
-    setIsLoading(true);
+    if (showLoading) setIsLoading(true);
     const { data, error } = await supabase
       .from('applications')
       .select('id, status, cover_letter, timeline, applied_at, internship_listings(id, title, organisation_profiles(name, logo_url))')
@@ -58,12 +66,27 @@ export default function ApplicationsScreen() {
     if (!error && data) {
       setApplications(data as Application[]);
     }
-    setIsLoading(false);
+    if (showLoading) setIsLoading(false);
   }, [profile?.id]);
 
   useEffect(() => {
     fetchApplications();
-  }, [fetchApplications]);
+
+    if (!profile?.id) return;
+
+    const channel = supabase
+      .channel('student-apps')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'applications', filter: `student_id=eq.${profile.id}` },
+        () => fetchApplications(false)
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [fetchApplications, profile?.id]);
 
   const filtered = applications.filter(
     (a) => activeTab === 'All' || a.status === activeTab
@@ -114,8 +137,8 @@ export default function ApplicationsScreen() {
         keyExtractor={(i) => i.id}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
-        onRefresh={fetchApplications}
-        refreshing={isLoading}
+        onRefresh={handleRefresh}
+        refreshing={isRefreshing}
         ListEmptyComponent={
           <View style={styles.emptyState}>
             <Inbox size={56} color={Colors.light.textMuted} />
@@ -143,7 +166,15 @@ export default function ApplicationsScreen() {
             >
               <View style={styles.cardTop}>
                 <View style={styles.logoWrap}>
-                  <Text style={styles.logoText}>{orgInitial}</Text>
+                  {item.internship_listings?.organisation_profiles?.logo_url ? (
+                    <Image
+                      source={{ uri: item.internship_listings.organisation_profiles.logo_url }}
+                      style={styles.logoImage}
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <Text style={styles.logoText}>{orgInitial}</Text>
+                  )}
                 </View>
                 <View style={styles.cardInfo}>
                   <Text style={styles.cardRole} numberOfLines={2}>
@@ -231,7 +262,9 @@ const styles = StyleSheet.create({
   logoWrap: {
     width: 44, height: 44, borderRadius: 12,
     backgroundColor: Colors.light.lightBlue, justifyContent: 'center', alignItems: 'center',
+    overflow: 'hidden',
   },
+  logoImage: { width: 44, height: 44, borderRadius: 12 },
   logoText: { fontFamily: 'DMSans_700Bold', fontSize: 20, color: Colors.light.primaryBlue },
   cardInfo: { flex: 1 },
   cardRole: { fontFamily: 'DMSans_600SemiBold', fontSize: 14, color: Colors.light.textDark, marginBottom: 2 },
@@ -253,6 +286,6 @@ const styles = StyleSheet.create({
   expandHint: { marginTop: 12, alignItems: 'center' },
   expandHintText: { ...Typography.micro, color: Colors.light.textMuted },
   emptyState: { alignItems: 'center', paddingTop: 80, gap: 12 },
-  emptyTitle: { fontFamily: 'Fraunces_700Bold', fontSize: 22, color: Colors.light.textDark },
+  emptyTitle: { fontFamily: 'DMSans_700Bold', fontSize: 22, color: Colors.light.textDark },
   emptyText: { ...Typography.body, color: Colors.light.textMuted, textAlign: 'center', paddingHorizontal: 20 },
 });

@@ -5,13 +5,15 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Sparkles, ChevronRight, RefreshCw, Download, BookOpen, Briefcase, FolderOpen, CheckCircle } from 'lucide-react-native';
+import { Sparkles, ChevronRight, RefreshCw, Download, BookOpen, Briefcase, FolderOpen, CheckCircle, Award, Code2, Target, FileText, Heart } from 'lucide-react-native';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
 import { Colors } from '@/constants/Colors';
 import { Typography, Radii } from '@/constants/theme';
 import { useAuthStore } from '@/store/authStore';
 import { supabase } from '@/lib/supabase';
 import { generateCVWithAI, CVData, EducationEntry, ExperienceEntry, ProjectEntry } from '@/lib/nvidia';
-import { EducationStep, ExperienceStep, ProjectsStep } from '@/components/CVSteps';
+import { EducationStep, ExperienceStep, ProjectsStep, EducationDraft, ExperienceDraft, ProjectDraft } from '@/components/CVSteps';
 
 const C = Colors.light;
 
@@ -29,6 +31,11 @@ export default function CVBuilderScreen() {
   const [educationEntries, setEducationEntries] = useState<EducationEntry[]>([]);
   const [experienceEntries, setExperienceEntries] = useState<ExperienceEntry[]>([]);
   const [projectEntries, setProjectEntries] = useState<ProjectEntry[]>([]);
+
+  // Draft (in-progress form) state — lifted up so handleGenerate can auto-flush
+  const [eduDraft, setEduDraft] = useState<EducationDraft>({ inst: '', deg: '', period: '' });
+  const [expDraft, setExpDraft] = useState<ExperienceDraft>({ company: '', role: '', period: '', desc: '' });
+  const [projDraft, setProjDraft] = useState<ProjectDraft>({ title: '', desc: '', tech: '' });
 
   // Load any previously generated CV
   useEffect(() => {
@@ -58,6 +65,43 @@ export default function CVBuilderScreen() {
     }
     if (!profile?.id) return;
 
+    // ── Auto-flush any unsaved draft entries ──────────────────
+    let finalEducation = [...educationEntries];
+    let finalExperience = [...experienceEntries];
+    let finalProjects = [...projectEntries];
+
+    if (eduDraft.inst.trim() && eduDraft.deg.trim()) {
+      finalEducation = [...finalEducation, {
+        institution: eduDraft.inst.trim(),
+        degree: eduDraft.deg.trim(),
+        period: eduDraft.period.trim(),
+      }];
+      setEducationEntries(finalEducation);
+      setEduDraft({ inst: '', deg: '', period: '' });
+    }
+
+    if (expDraft.company.trim() && expDraft.role.trim()) {
+      finalExperience = [...finalExperience, {
+        company: expDraft.company.trim(),
+        role: expDraft.role.trim(),
+        period: expDraft.period.trim(),
+        description: expDraft.desc.trim(),
+      }];
+      setExperienceEntries(finalExperience);
+      setExpDraft({ company: '', role: '', period: '', desc: '' });
+    }
+
+    if (projDraft.title.trim()) {
+      finalProjects = [...finalProjects, {
+        title: projDraft.title.trim(),
+        description: projDraft.desc.trim(),
+        technologies: projDraft.tech.trim(),
+      }];
+      setProjectEntries(finalProjects);
+      setProjDraft({ title: '', desc: '', tech: '' });
+    }
+    // ─────────────────────────────────────────────────────────
+
     setStep('generating');
 
     try {
@@ -75,9 +119,9 @@ export default function CVBuilderScreen() {
         linkedinUrl: profile.linkedin_url,
         portfolioUrl: profile.portfolio_url,
         targetRole: targetRole.trim(),
-        educationEntries,
-        experienceEntries,
-        projectEntries,
+        educationEntries: finalEducation,
+        experienceEntries: finalExperience,
+        projectEntries: finalProjects,
       };
 
       console.log('[CVBuilder] Starting generation for:', ctx.targetRole);
@@ -99,6 +143,7 @@ export default function CVBuilderScreen() {
         { onConflict: 'student_id' }
       );
       if (dbErr) console.warn('[CVBuilder] DB save warning:', dbErr.message);
+      else setCvSaved(true);
 
       setCvData(result);
       setSavedAt(now);
@@ -121,6 +166,77 @@ export default function CVBuilderScreen() {
     setStep('role');
   };
 
+  // ── PDF helpers ──────────────────────────────────────────────
+  const buildCVHtml = (cv: CVData): string => {
+    const name = `${profile?.first_name ?? ''} ${profile?.last_name ?? ''}`.trim();
+    const contact = [profile?.email, profile?.phone, profile?.linkedin_url, profile?.portfolio_url].filter(Boolean).join('  ·  ');
+
+    const eduRows = cv.education.map(e =>
+      `<div class="entry"><div class="entry-head"><span class="entry-title">${e.institution}</span><span class="entry-date">${e.period ?? ''}</span></div><div class="entry-sub">${e.degree}${e.gpa ? ` — GPA: ${e.gpa}` : ''}</div></div>`
+    ).join('');
+
+    const expRows = cv.experience?.length ? cv.experience.map(e =>
+      `<div class="entry"><div class="entry-head"><span class="entry-title">${e.role} — ${e.company}</span><span class="entry-date">${e.period ?? ''}</span></div>${e.description ? `<div class="entry-body">${e.description}</div>` : ''}</div>`
+    ).join('') : '';
+
+    const projRows = cv.projects.map(p =>
+      `<div class="entry"><div class="entry-head"><span class="entry-title">${p.title}</span></div><div class="entry-body">${p.description}</div><div class="tech-row">${(Array.isArray(p.technologies) ? p.technologies : []).map((t: string) => `<span class="tech">${t}</span>`).join(' ')}</div></div>`
+    ).join('');
+
+    const skillRows = cv.skills.map(g =>
+      `<div class="skill-group"><span class="skill-cat">${g.category}: </span>${g.items.join(', ')}</div>`
+    ).join('');
+
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"/><style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 11pt; color: #1a1a2e; line-height: 1.5; padding: 36px 40px; }
+      .cv-header { background: linear-gradient(135deg, #1a56db, #3b82f6); color: #fff; padding: 24px 28px; border-radius: 10px; margin-bottom: 20px; }
+      .cv-name { font-size: 22pt; font-weight: 700; margin-bottom: 4px; }
+      .cv-role { font-size: 12pt; opacity: 0.9; margin-bottom: 4px; }
+      .cv-contact { font-size: 9pt; opacity: 0.75; }
+      .section { margin-bottom: 18px; }
+      .section-title { font-size: 10pt; font-weight: 700; color: #1a56db; text-transform: uppercase; letter-spacing: 0.5px; border-left: 3px solid #3b82f6; padding-left: 8px; margin-bottom: 10px; }
+      .entry { margin-bottom: 10px; }
+      .entry-head { display: flex; justify-content: space-between; align-items: flex-start; }
+      .entry-title { font-weight: 600; font-size: 11pt; }
+      .entry-date { font-size: 9pt; color: #6b7280; white-space: nowrap; padding-left: 8px; }
+      .entry-sub { color: #6b7280; font-size: 10pt; margin-top: 2px; }
+      .entry-body { font-size: 10pt; color: #374151; margin-top: 4px; }
+      .skill-group { font-size: 10pt; margin-bottom: 5px; }
+      .skill-cat { font-weight: 600; }
+      .tech-row { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px; }
+      .tech { background: #eff6ff; color: #1a56db; border-radius: 4px; padding: 2px 8px; font-size: 9pt; }
+      .hobbies { font-size: 10pt; color: #374151; }
+    </style></head><body>
+      <div class="cv-header">
+        <div class="cv-name">${name}</div>
+        <div class="cv-role">${cv.targetRole} Intern</div>
+        <div class="cv-contact">${contact}</div>
+      </div>
+      <div class="section"><div class="section-title">📝 Professional Summary</div><div class="entry-body">${cv.summary}</div></div>
+      <div class="section"><div class="section-title">🎓 Education</div>${eduRows}</div>
+      <div class="section"><div class="section-title">🏅 Skills</div>${skillRows}</div>
+      ${projRows ? `<div class="section"><div class="section-title">⟨⟩ Projects</div>${projRows}</div>` : ''}
+      ${expRows ? `<div class="section"><div class="section-title">💼 Work Experience</div>${expRows}</div>` : ''}
+      <div class="section"><div class="section-title">🎯 Hobbies &amp; Interests</div><div class="hobbies">${cv.hobbies.join('  ·  ')}</div></div>
+    </body></html>`;
+  };
+
+  const handleDownloadPDF = async () => {
+    if (!cvData) return;
+    try {
+      const { uri } = await Print.printToFileAsync({ html: buildCVHtml(cvData), base64: false });
+      const canShare = await Sharing.isAvailableAsync();
+      if (canShare) {
+        await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: 'Save or Share your CV' });
+      } else {
+        Alert.alert('Saved', `PDF saved to: ${uri}`);
+      }
+    } catch (e: any) {
+      Alert.alert('Error', e?.message ?? 'Could not generate PDF.');
+    }
+  };
+
   // ─── Render steps ────────────────────────────────────────────
 
   return (
@@ -135,7 +251,7 @@ export default function CVBuilderScreen() {
         >
           <View style={s.headerInner}>
             <View>
-              <Text style={s.headerTitle}>AI CV Builder</Text>
+              <Text style={s.headerTitle}>CV Builder</Text>
               <Text style={s.headerSub}>Your profile → Professional CV in seconds</Text>
             </View>
             <View style={s.headerIcon}>
@@ -274,7 +390,7 @@ export default function CVBuilderScreen() {
                 <Text style={s.sectionHeaderSub}>University, courses, certifications, bootcamps</Text>
               </View>
             </View>
-            <EducationStep entries={educationEntries} setEntries={setEducationEntries} />
+            <EducationStep entries={educationEntries} setEntries={setEducationEntries} draft={eduDraft} setDraft={setEduDraft} />
             <View style={[s.btnRow, { marginTop: 16 }]}>
               <TouchableOpacity style={s.backBtn} onPress={() => setStep('role')}>
                 <Text style={s.backBtnText}>← Back</Text>
@@ -299,7 +415,7 @@ export default function CVBuilderScreen() {
                 <Text style={s.sectionHeaderSub}>Internships, part-time jobs, volunteering</Text>
               </View>
             </View>
-            <ExperienceStep entries={experienceEntries} setEntries={setExperienceEntries} />
+            <ExperienceStep entries={experienceEntries} setEntries={setExperienceEntries} draft={expDraft} setDraft={setExpDraft} />
             <View style={[s.btnRow, { marginTop: 16 }]}>
               <TouchableOpacity style={s.backBtn} onPress={() => setStep('education')}>
                 <Text style={s.backBtnText}>← Back</Text>
@@ -324,7 +440,7 @@ export default function CVBuilderScreen() {
                 <Text style={s.sectionHeaderSub}>Academic, personal or open-source projects</Text>
               </View>
             </View>
-            <ProjectsStep entries={projectEntries} setEntries={setProjectEntries} />
+            <ProjectsStep entries={projectEntries} setEntries={setProjectEntries} draft={projDraft} setDraft={setProjDraft} />
             <View style={[s.btnRow, { marginTop: 16 }]}>
               <TouchableOpacity style={s.backBtn} onPress={() => setStep('experience')}>
                 <Text style={s.backBtnText}>← Back</Text>
@@ -371,7 +487,7 @@ export default function CVBuilderScreen() {
             )}
 
             <View style={s.resultBanner}>
-              <Text style={s.resultBannerIcon}>✅</Text>
+              <CheckCircle size={22} color={C.success} />
               <View style={{ flex: 1 }}>
                 <Text style={s.resultBannerTitle}>CV Generated!</Text>
                 {savedAt && (
@@ -404,12 +520,12 @@ export default function CVBuilderScreen() {
               </View>
 
               {/* Summary */}
-              <CVSection title="Professional Summary" icon="📝">
+              <CVSection title="Professional Summary" icon={<FileText size={13} color={C.accentBlue} />}>
                 <Text style={s.cvBodyText}>{cvData.summary}</Text>
               </CVSection>
 
               {/* Education */}
-              <CVSection title="Education" icon="🎓">
+              <CVSection title="Education" icon={<BookOpen size={13} color={C.accentBlue} />}>
                 {cvData.education.map((edu, i) => (
                   <View key={i} style={s.cvEntry}>
                     <View style={s.cvEntryHeader}>
@@ -422,7 +538,7 @@ export default function CVBuilderScreen() {
               </CVSection>
 
               {/* Skills */}
-              <CVSection title="Skills" icon="🏅">
+              <CVSection title="Skills" icon={<Award size={13} color={C.accentBlue} />}>
                 {cvData.skills.map((group, i) => (
                   <View key={i} style={s.skillGroup}>
                     <Text style={s.skillGroupLabel}>{group.category}:</Text>
@@ -432,7 +548,7 @@ export default function CVBuilderScreen() {
               </CVSection>
 
               {/* Projects */}
-              <CVSection title="Projects" icon="⟨⟩">
+              <CVSection title="Projects" icon={<Code2 size={13} color={C.accentBlue} />}>
                 {cvData.projects.map((proj, i) => (
                   <View key={i} style={s.cvEntry}>
                     <View style={s.cvEntryHeader}>
@@ -450,7 +566,7 @@ export default function CVBuilderScreen() {
 
               {/* Experience */}
               {cvData.experience && cvData.experience.length > 0 && (
-                <CVSection title="Work Experience" icon="💼">
+                <CVSection title="Work Experience" icon={<Briefcase size={13} color={C.accentBlue} />}>
                   {cvData.experience.map((exp, i) => (
                     <View key={i} style={s.cvEntry}>
                       <View style={s.cvEntryHeader}>
@@ -464,7 +580,7 @@ export default function CVBuilderScreen() {
               )}
 
               {/* Hobbies */}
-              <CVSection title="Hobbies & Interests" icon="🎯">
+              <CVSection title="Hobbies & Interests" icon={<Heart size={13} color={C.accentBlue} />}>
                 <Text style={s.cvBodyText}>{cvData.hobbies.join('  ·  ')}</Text>
               </CVSection>
             </View>
@@ -487,7 +603,7 @@ export default function CVBuilderScreen() {
                 <CheckCircle size={16} color={C.primaryBlue} />
                 <Text style={s.actionBtnText}>Save CV</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[s.actionBtn, s.actionBtnSolid]} onPress={() => Alert.alert('Coming soon', 'PDF download will be available soon.')}>
+              <TouchableOpacity style={[s.actionBtn, s.actionBtnSolid]} onPress={handleDownloadPDF}>
                 <Download size={16} color="#fff" />
                 <Text style={[s.actionBtnText, { color: '#fff' }]}>Download PDF</Text>
               </TouchableOpacity>
@@ -503,12 +619,13 @@ export default function CVBuilderScreen() {
 
 // ── Sub-components ─────────────────────────────────────────────
 
-function CVSection({ title, icon, children }: { title: string; icon: string; children: React.ReactNode }) {
+function CVSection({ title, icon, children }: { title: string; icon: React.ReactNode; children: React.ReactNode }) {
   return (
     <View style={s.cvSection}>
       <View style={s.cvSectionHeader}>
         <View style={s.cvSectionBar} />
-        <Text style={s.cvSectionTitle}>{icon}  {title}</Text>
+        <View style={s.cvSectionIconWrap}>{icon}</View>
+        <Text style={s.cvSectionTitle}>{title}</Text>
       </View>
       <View style={s.cvSectionBody}>{children}</View>
     </View>
@@ -523,7 +640,7 @@ const s = StyleSheet.create({
   // Header
   headerGradient: { paddingTop: 20, paddingBottom: 28, paddingHorizontal: 20 },
   headerInner: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  headerTitle: { fontFamily: 'Fraunces_700Bold', fontSize: 24, color: '#fff' },
+  headerTitle: { fontFamily: 'DMSans_700Bold', fontSize: 24, color: '#fff' },
   headerSub: { ...Typography.label, color: 'rgba(255,255,255,0.75)', marginTop: 3 },
   headerIcon: { width: 48, height: 48, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' },
   stepsRow: { flexDirection: 'row', alignItems: 'center' },
@@ -578,7 +695,7 @@ const s = StyleSheet.create({
   // Generating
   generatingContainer: { padding: 20, flex: 1 },
   generatingCard: { borderRadius: Radii.card, padding: 32, alignItems: 'center', borderWidth: 1, borderColor: C.cardBorder },
-  generatingTitle: { fontFamily: 'Fraunces_700Bold', fontSize: 22, color: C.textDark, marginTop: 20, marginBottom: 8 },
+  generatingTitle: { fontFamily: 'DMSans_700Bold', fontSize: 22, color: C.textDark, marginTop: 20, marginBottom: 8 },
   generatingSubtitle: { ...Typography.body, color: C.textMuted, textAlign: 'center', lineHeight: 22, marginBottom: 28 },
   generatingSteps: { width: '100%', gap: 12 },
   genStep: { flexDirection: 'row', alignItems: 'center', gap: 12 },
@@ -587,7 +704,6 @@ const s = StyleSheet.create({
 
   // Result banner
   resultBanner: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: C.success + '12', borderRadius: Radii.card, borderWidth: 1, borderColor: C.success + '30', padding: 14, marginBottom: 16 },
-  resultBannerIcon: { fontSize: 24 },
   resultBannerTitle: { fontFamily: 'DMSans_700Bold', fontSize: 15, color: C.success },
   resultBannerDate: { ...Typography.micro, color: C.textMuted, marginTop: 2 },
   regenBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20, borderWidth: 1.5, borderColor: C.accentBlue },
@@ -603,8 +719,9 @@ const s = StyleSheet.create({
   cvContact: { ...Typography.micro, color: 'rgba(255,255,255,0.65)', marginTop: 4 },
 
   cvSection: { borderTopWidth: 1, borderTopColor: C.borderLight },
-  cvSectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingTop: 14, paddingBottom: 8 },
+  cvSectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingTop: 14, paddingBottom: 8 },
   cvSectionBar: { width: 3, height: 16, borderRadius: 2, backgroundColor: C.accentBlue },
+  cvSectionIconWrap: { width: 22, height: 22, borderRadius: 6, backgroundColor: C.lightBlue, justifyContent: 'center', alignItems: 'center' },
   cvSectionTitle: { fontFamily: 'DMSans_700Bold', fontSize: 13, color: C.primaryBlue, textTransform: 'uppercase', letterSpacing: 0.5 },
   cvSectionBody: { paddingHorizontal: 16, paddingBottom: 14, gap: 10 },
 

@@ -1,14 +1,14 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity,
-  FlatList, ScrollView, ActivityIndicator,
+  FlatList, ScrollView, ActivityIndicator, Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Colors } from '@/constants/Colors';
 import { Typography, Radii } from '@/constants/theme';
 import { formatNairaRange, NIGERIAN_LOCATIONS } from '@/constants/AppData';
-import { Search, SlidersHorizontal, MapPin, Clock, Bookmark } from 'lucide-react-native';
+import { Search, SlidersHorizontal, MapPin, Clock, Bookmark, SearchX } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/store/authStore';
 
@@ -22,6 +22,7 @@ interface Listing {
   created_at: string;
   required_skills: string[];
   status: string;
+  duration: string | null;
   organisation_profiles: { name: string; logo_url: string | null } | null;
 }
 
@@ -46,6 +47,7 @@ export default function SearchScreen() {
 
   const [allListings, setAllListings] = useState<Listing[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
 
   const fetchListings = useCallback(async () => {
@@ -66,6 +68,12 @@ export default function SearchScreen() {
     if (data) setSavedIds(new Set(data.map((r: { listing_id: string }) => r.listing_id)));
   }, [profile?.id]);
 
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await Promise.all([fetchListings(), fetchSaved()]);
+    setIsRefreshing(false);
+  };
+
   useEffect(() => {
     const load = async () => {
       setIsLoading(true);
@@ -73,6 +81,19 @@ export default function SearchScreen() {
       setIsLoading(false);
     };
     load();
+
+    const channel = supabase
+      .channel('public-listings')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'internship_listings' },
+        () => fetchListings()
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [fetchListings, fetchSaved]);
 
   const toggleSave = async (listingId: string) => {
@@ -212,9 +233,11 @@ export default function SearchScreen() {
             keyExtractor={(i) => i.id}
             contentContainerStyle={styles.listContent}
             showsVerticalScrollIndicator={false}
+            onRefresh={handleRefresh}
+            refreshing={isRefreshing}
             ListEmptyComponent={
               <View style={styles.emptyState}>
-                <Text style={styles.emptyIcon}>🔍</Text>
+                <SearchX size={52} color={Colors.light.textMuted} />
                 <Text style={styles.emptyTitle}>No results found</Text>
                 <Text style={styles.emptyText}>Try adjusting your filters or search term</Text>
               </View>
@@ -229,9 +252,17 @@ export default function SearchScreen() {
                   onPress={() => router.push(`/(app)/apply/${item.id}`)}
                 >
                   <View style={styles.cardHeader}>
-                    <View style={styles.cardLogo}>
+                  <View style={styles.cardLogo}>
+                    {item.organisation_profiles?.logo_url ? (
+                      <Image
+                        source={{ uri: item.organisation_profiles.logo_url }}
+                        style={styles.cardLogoImage}
+                        resizeMode="cover"
+                      />
+                    ) : (
                       <Text style={styles.cardLogoText}>{initials}</Text>
-                    </View>
+                    )}
+                  </View>
                     <View style={styles.cardHeaderRight}>
                       <View style={[
                         styles.matchBadge,
@@ -265,6 +296,12 @@ export default function SearchScreen() {
                       <MapPin size={11} color={Colors.light.textMuted} />
                       <Text style={styles.cardMetaText}>{item.location ?? 'Remote'}</Text>
                     </View>
+                    {item.duration && (
+                      <View style={styles.cardMetaItem}>
+                        <Clock size={11} color={Colors.light.textMuted} />
+                        <Text style={styles.cardMetaText}>{item.duration}</Text>
+                      </View>
+                    )}
                     <View style={styles.cardMetaItem}>
                       <Clock size={11} color={Colors.light.textMuted} />
                       <Text style={styles.cardMetaText}>{timeSince(item.created_at)}</Text>
@@ -356,7 +393,9 @@ const styles = StyleSheet.create({
   cardLogo: {
     width: 44, height: 44, borderRadius: 12,
     backgroundColor: Colors.light.lightBlue, justifyContent: 'center', alignItems: 'center',
+    overflow: 'hidden',
   },
+  cardLogoImage: { width: 44, height: 44, borderRadius: 12 },
   cardLogoText: { fontFamily: 'DMSans_700Bold', fontSize: 18, color: Colors.light.primaryBlue },
   cardHeaderRight: { flexDirection: 'row', gap: 8, alignItems: 'center' },
   matchBadge: { borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4 },
@@ -380,7 +419,6 @@ const styles = StyleSheet.create({
   applyBtnText: { fontFamily: 'DMSans_600SemiBold', fontSize: 13, color: Colors.light.primaryBlue },
 
   emptyState: { alignItems: 'center', paddingTop: 60, paddingHorizontal: 40, gap: 10 },
-  emptyIcon: { fontSize: 48 },
   emptyTitle: { fontFamily: 'DMSans_600SemiBold', fontSize: 18, color: Colors.light.textDark },
   emptyText: { ...Typography.body, color: Colors.light.textMuted, textAlign: 'center' },
 });

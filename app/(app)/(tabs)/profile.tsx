@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIndicator,
-  Image, ImageBackground,
+  Image, ImageBackground, Modal, RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -9,6 +9,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import {
   Pencil, Bell, Lock, Key, HelpCircle, Info, LogOut,
   ChevronRight, FileText, Bookmark, List, Trash2,
+  BookOpen, Briefcase, Award, Code2, Target, X,
 } from 'lucide-react-native';
 import { Colors } from '@/constants/Colors';
 import { Typography, Radii } from '@/constants/theme';
@@ -43,9 +44,8 @@ interface SavedItem {
 interface CvProfile {
   id: string;
   target_role: string | null;
-  template_id: string | null;
   generated_at: string | null;
-  skills: string[];
+  cv_data: any | null;
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -57,13 +57,15 @@ const STATUS_COLORS: Record<string, string> = {
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const { profile, signOut } = useAuthStore();
+  const { profile, signOut, fetchProfile } = useAuthStore();
 
   const [activeTab, setActiveTab] = useState<'applications' | 'saved' | 'cvs'>('applications');
   const [recentApps, setRecentApps] = useState<MiniApplication[]>([]);
   const [savedItems, setSavedItems] = useState<SavedItem[]>([]);
   const [cvProfile, setCvProfile] = useState<CvProfile | null>(null);
   const [isLoadingTab, setIsLoadingTab] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [cvModalVisible, setCvModalVisible] = useState(false);
 
   // Modal states
   const [editVisible, setEditVisible] = useState(false);
@@ -89,9 +91,9 @@ export default function ProfileScreen() {
   });
   const completionPct = Math.round((completedFields.length / COMPLETION_FIELDS.length) * 100);
 
-  const fetchTabData = useCallback(async () => {
+  const fetchTabData = useCallback(async (showLoading = true) => {
     if (!profile?.id) return;
-    setIsLoadingTab(true);
+    if (showLoading) setIsLoadingTab(true);
     const [appsRes, savedRes, cvRes] = await Promise.all([
       supabase
         .from('applications')
@@ -106,16 +108,27 @@ export default function ProfileScreen() {
         .order('saved_at', { ascending: false })
         .limit(5),
       supabase
-        .from('cv_profiles')
-        .select('id, target_role, template_id, generated_at, skills')
+        .from('generated_cvs')
+        .select('id, target_role, generated_at, cv_data')
         .eq('student_id', profile.id)
+        .order('version', { ascending: false })
+        .limit(1)
         .maybeSingle(),
     ]);
-    if (appsRes.data) setRecentApps(appsRes.data as MiniApplication[]);
-    if (savedRes.data) setSavedItems(savedRes.data as SavedItem[]);
-    if (cvRes.data) setCvProfile(cvRes.data as CvProfile);
-    setIsLoadingTab(false);
+    if (appsRes.data) setRecentApps(appsRes.data as unknown as MiniApplication[]);
+    if (savedRes.data) setSavedItems(savedRes.data as unknown as SavedItem[]);
+    if (cvRes.data) setCvProfile(cvRes.data as unknown as CvProfile);
+    if (showLoading) setIsLoadingTab(false);
   }, [profile?.id]);
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await Promise.all([
+      fetchProfile(),
+      fetchTabData(false),
+    ]);
+    setIsRefreshing(false);
+  };
 
   useEffect(() => { fetchTabData(); }, [fetchTabData]);
 
@@ -147,7 +160,10 @@ export default function ProfileScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={handleRefresh} />}
+      >
 
         {/* ── Header ── */}
         <ImageBackground
@@ -382,9 +398,14 @@ export default function ProfileScreen() {
                             Generated {new Date(cvProfile.generated_at).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' })}
                           </Text>
                         ) : null}
-                        <TouchableOpacity style={styles.cvEditBtn} onPress={() => router.push('/(app)/(tabs)/cv-builder')}>
-                          <Text style={styles.cvEditBtnText}>Edit CV</Text>
-                        </TouchableOpacity>
+                        <View style={{ flexDirection: 'row', gap: 10, marginTop: 6 }}>
+                          <TouchableOpacity style={styles.cvEditBtn} onPress={() => setCvModalVisible(true)}>
+                            <Text style={styles.cvEditBtnText}>View CV</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity style={[styles.cvEditBtn, { backgroundColor: 'rgba(255,255,255,0.1)' }]} onPress={() => router.push('/(app)/(tabs)/cv-builder')}>
+                            <Text style={styles.cvEditBtnText}>Edit / Redo</Text>
+                          </TouchableOpacity>
+                        </View>
                       </LinearGradient>
                     </View>
                   </View>
@@ -431,7 +452,107 @@ export default function ProfileScreen() {
       <ChangePasswordModal visible={passwordVisible} onClose={() => setPasswordVisible(false)} />
       <HelpModal visible={helpVisible} onClose={() => setHelpVisible(false)} />
       <AboutModal visible={aboutVisible} onClose={() => setAboutVisible(false)} />
+
+      {/* ── CV Preview Modal ── */}
+      {cvProfile?.cv_data && (
+        <Modal visible={cvModalVisible} animationType="slide" onRequestClose={() => setCvModalVisible(false)}>
+          <SafeAreaView style={{ flex: 1, backgroundColor: C.background }}>
+            <View style={styles.cvModalHeader}>
+              <Text style={styles.cvModalTitle}>My CV</Text>
+              <TouchableOpacity style={styles.cvModalClose} onPress={() => setCvModalVisible(false)}>
+                <X size={18} color={C.textMuted} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
+              {/* Header */}
+              <LinearGradient colors={[C.primaryBlue, C.accentBlue]} style={styles.cvDocHeader} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+                <Text style={styles.cvName}>{profile?.first_name} {profile?.last_name}</Text>
+                <Text style={styles.cvRole}>{cvProfile.cv_data.targetRole} Intern</Text>
+                <Text style={styles.cvContact}>{profile?.email}{profile?.phone ? `  ·  ${profile.phone}` : ''}</Text>
+              </LinearGradient>
+
+              {/* Summary */}
+              <CVPreviewSection title="Professional Summary" icon={<FileText size={14} color={C.accentBlue} />}>
+                <Text style={styles.cvBody}>{cvProfile.cv_data.summary}</Text>
+              </CVPreviewSection>
+
+              {/* Education */}
+              <CVPreviewSection title="Education" icon={<BookOpen size={14} color={C.accentBlue} />}>
+                {cvProfile.cv_data.education?.map((edu: any, i: number) => (
+                  <View key={i} style={styles.cvEntry}>
+                    <View style={styles.cvEntryRow}>
+                      <Text style={styles.cvEntryTitle}>{edu.institution}</Text>
+                      <Text style={styles.cvEntryDate}>{edu.period}</Text>
+                    </View>
+                    <Text style={styles.cvEntrySub}>{edu.degree}{edu.gpa ? ` — GPA: ${edu.gpa}` : ''}</Text>
+                  </View>
+                ))}
+              </CVPreviewSection>
+
+              {/* Skills */}
+              <CVPreviewSection title="Skills" icon={<Award size={14} color={C.accentBlue} />}>
+                {cvProfile.cv_data.skills?.map((g: any, i: number) => (
+                  <Text key={i} style={styles.cvBody}><Text style={{ fontFamily: 'DMSans_600SemiBold' }}>{g.category}: </Text>{g.items?.join(', ')}</Text>
+                ))}
+              </CVPreviewSection>
+
+              {/* Projects */}
+              {cvProfile.cv_data.projects?.length > 0 && (
+                <CVPreviewSection title="Projects" icon={<Code2 size={14} color={C.accentBlue} />}>
+                  {cvProfile.cv_data.projects.map((p: any, i: number) => (
+                    <View key={i} style={styles.cvEntry}>
+                      <Text style={styles.cvEntryTitle}>{p.title}</Text>
+                      <Text style={styles.cvBody}>{p.description}</Text>
+                      <View style={styles.techRow}>
+                        {(Array.isArray(p.technologies) ? p.technologies : []).map((t: string) => (
+                          <View key={t} style={styles.techChip}><Text style={styles.techChipText}>{t}</Text></View>
+                        ))}
+                      </View>
+                    </View>
+                  ))}
+                </CVPreviewSection>
+              )}
+
+              {/* Experience */}
+              {cvProfile.cv_data.experience?.length > 0 && (
+                <CVPreviewSection title="Work Experience" icon={<Briefcase size={14} color={C.accentBlue} />}>
+                  {cvProfile.cv_data.experience.map((e: any, i: number) => (
+                    <View key={i} style={styles.cvEntry}>
+                      <View style={styles.cvEntryRow}>
+                        <Text style={styles.cvEntryTitle}>{e.role} — {e.company}</Text>
+                        <Text style={styles.cvEntryDate}>{e.period}</Text>
+                      </View>
+                      {e.description ? <Text style={styles.cvBody}>{e.description}</Text> : null}
+                    </View>
+                  ))}
+                </CVPreviewSection>
+              )}
+
+              {/* Hobbies */}
+              {cvProfile.cv_data.hobbies?.length > 0 && (
+                <CVPreviewSection title="Hobbies & Interests" icon={<Target size={14} color={C.accentBlue} />}>
+                  <Text style={styles.cvBody}>{cvProfile.cv_data.hobbies.join('  ·  ')}</Text>
+                </CVPreviewSection>
+              )}
+            </ScrollView>
+          </SafeAreaView>
+        </Modal>
+      )}
     </SafeAreaView>
+  );
+}
+
+// ── CV Preview Section helper ──────────────────────────────────
+function CVPreviewSection({ title, icon, children }: { title: string; icon?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <View style={styles.cvSection}>
+      <View style={styles.cvSectionHeader}>
+        <View style={styles.cvSectionBar} />
+        {icon && <View style={styles.cvSectionIcon}>{icon}</View>}
+        <Text style={styles.cvSectionTitle}>{title}</Text>
+      </View>
+      <View style={{ gap: 8 }}>{children}</View>
+    </View>
   );
 }
 
@@ -446,7 +567,7 @@ const styles = StyleSheet.create({
   avatar: { width: 88, height: 88, borderRadius: 44, backgroundColor: 'rgba(255,255,255,0.25)', justifyContent: 'center', alignItems: 'center', borderWidth: 3, borderColor: '#fff', overflow: 'hidden' },
   avatarImage: { width: '100%', height: '100%', resizeMode: 'cover' },
   avatarText: { fontFamily: 'DMSans_700Bold', fontSize: 36, color: '#fff' },
-  profileName: { fontFamily: 'Fraunces_700Bold', fontSize: 24, color: '#fff', marginBottom: 6, textAlign: 'center', zIndex: 1 },
+  profileName: { fontFamily: 'DMSans_700Bold', fontSize: 24, color: '#fff', marginBottom: 6, textAlign: 'center', zIndex: 1 },
   profileDept: { ...Typography.body, color: 'rgba(255,255,255,0.8)', textAlign: 'center', zIndex: 1 },
 
   // About card (floats over header bottom)
@@ -531,4 +652,28 @@ const styles = StyleSheet.create({
   settingsDivider: { height: 1, backgroundColor: C.borderLight, marginLeft: 66 },
   signOutBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, marginTop: 20, paddingVertical: 15, borderRadius: Radii.card, borderWidth: 1, borderColor: C.error + '30', backgroundColor: C.error + '08' },
   signOutText: { fontFamily: 'DMSans_600SemiBold', fontSize: 15, color: C.error },
+
+  // CV Preview Modal
+  cvModalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: 28, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: C.borderLight, backgroundColor: C.white },
+  cvModalTitle: { fontFamily: 'DMSans_700Bold', fontSize: 18, color: C.textDark },
+  cvModalClose: { padding: 8, borderRadius: 20, backgroundColor: C.surfaceGrey },
+  cvModalCloseText: { fontFamily: 'DMSans_600SemiBold', fontSize: 13, color: C.textMuted },
+  cvDocHeader: { padding: 20, borderRadius: 12, marginBottom: 16 },
+  cvName: { fontFamily: 'DMSans_700Bold', fontSize: 20, color: '#fff' },
+  cvRole: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: 'rgba(255,255,255,0.85)', marginTop: 2 },
+  cvContact: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: 'rgba(255,255,255,0.65)', marginTop: 4 },
+  cvSection: { backgroundColor: C.white, borderRadius: 12, borderWidth: 1, borderColor: C.cardBorder, padding: 14, marginBottom: 12 },
+  cvSectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
+  cvSectionBar: { width: 3, height: 16, borderRadius: 2, backgroundColor: C.accentBlue },
+  cvSectionIcon: { width: 22, height: 22, borderRadius: 6, backgroundColor: C.lightBlue, justifyContent: 'center', alignItems: 'center' },
+  cvSectionTitle: { fontFamily: 'DMSans_700Bold', fontSize: 12, color: C.primaryBlue, textTransform: 'uppercase', letterSpacing: 0.5 },
+  cvEntry: { gap: 4, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: C.borderLight },
+  cvEntryRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  cvEntryTitle: { fontFamily: 'DMSans_600SemiBold', fontSize: 13, color: C.textDark, flex: 1 },
+  cvEntryDate: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: C.textMuted },
+  cvEntrySub: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: C.textMuted },
+  cvBody: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: C.textDark, lineHeight: 20 },
+  techRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 4 },
+  techChip: { backgroundColor: C.lightBlue, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
+  techChipText: { fontFamily: 'DMSans_500Medium', fontSize: 10, color: C.primaryBlue },
 });
