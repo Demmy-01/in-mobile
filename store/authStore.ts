@@ -50,7 +50,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   setSession: (session) => {
     const currentUserId = get().user?.id;
     const newUserId = session?.user?.id;
-    // If the user has changed (including sign-out), wipe the cached profile
     if (currentUserId !== newUserId) {
       set({ session, user: session?.user ?? null, profile: null });
     } else {
@@ -66,41 +65,83 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   signOut: async () => {
     set({ isLoading: true });
-    await supabase.auth.signOut();
-    set({ session: null, user: null, profile: null, isLoading: false });
+    try {
+      await supabase.auth.signOut();
+    } catch (e) {
+      console.warn('[signOut] Exception:', e);
+    } finally {
+      // Always clear — even if Supabase fails
+      set({ session: null, user: null, profile: null, isLoading: false });
+    }
   },
 
   fetchProfile: async () => {
-    const { user } = get();
-    if (!user) return;
+    // Read fresh session directly from Supabase client, NOT from store state
+    // (avoids timing bugs where store hasn't been updated yet)
+    const { data: { session } } = await supabase.auth.getSession();
+    const userId = session?.user?.id;
 
-    const { data, error } = await supabase
-      .from('student_profiles')
-      .select('*')
-      .eq('id', user.id)
-      .single();
+    if (!userId) {
+      console.warn('[fetchProfile] ❌ No active session — cannot fetch profile');
+      set({ profile: null });
+      return;
+    }
 
-    if (!error && data) {
+    console.log('[fetchProfile] 🔍 Fetching profile for userId:', userId);
+
+    try {
+      const { data, error } = await supabase
+        .from('student_profiles')
+        .select('*')
+        .eq('id', userId)
+        .maybeSingle(); // won't throw if row doesn't exist
+
+      if (error) {
+        console.error('[fetchProfile] ❌ DB Query Error:', error.code, '-', error.message);
+        if (error.hint) console.error('[fetchProfile] Hint:', error.hint);
+        set({ profile: null });
+        return;
+      }
+
+      if (!data) {
+        console.warn('[fetchProfile] ⚠️  No student_profiles row found for userId:', userId);
+        console.warn('[fetchProfile] DEBUG: This means the profile insert during signup may have failed.');
+        console.warn('[fetchProfile] DEBUG: Check RLS policies on student_profiles table.');
+        set({ profile: null });
+        return;
+      }
+
+      console.log('[fetchProfile] ✅ Profile loaded successfully:');
+      console.log('  - Name:', data.first_name, data.last_name);
+      console.log('  - Email:', data.email);
+      console.log('  - Matric:', data.matric_number ?? 'NOT SET');
+      console.log('  - Created At:', data.created_at);
+      
       set({ profile: data });
+    } catch (err: any) {
+      console.error('[fetchProfile] ❌ Unexpected error:', err.message);
+      set({ profile: null });
     }
   },
 
   updateProfile: async (updates) => {
-    const { user, profile } = get();
-    if (!user) throw new Error('Not authenticated');
+    const { data: { session } } = await supabase.auth.getSession();
+    const userId = session?.user?.id;
+    if (!userId) throw new Error('Not authenticated');
 
     const { data, error } = await supabase
       .from('student_profiles')
       .update({ ...updates, updated_at: new Date().toISOString() })
-      .eq('id', user.id)
+      .eq('id', userId)
       .select()
       .single();
 
     if (error) {
-      console.error('[updateProfile] Supabase error:', error);
+      console.error('[updateProfile] Error:', error.code, error.message);
       throw new Error(error.message);
     }
     if (data) {
+      const { profile } = get();
       set({ profile: { ...profile!, ...data } });
     }
   },

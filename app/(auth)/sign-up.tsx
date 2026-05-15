@@ -62,26 +62,18 @@ export default function SignUpScreen() {
     if (error) {
       Alert.alert('Registration Failed', error.message);
     } else if (data?.user) {
-      // Insert the student_profiles row (auth trigger may not exist yet)
-      const { error: profileError } = await supabase.from('student_profiles').insert({
-        id: data.user.id,
-        first_name: firstName.trim(),
-        last_name: lastName.trim(),
-        matric_number: matricNumber.trim().toUpperCase(),
-        email: email.trim(),
-        skills: [],
-        hobbies: [],
+      // Do NOT insert the profile here — Supabase returns no session before
+      // email confirmation, so any insert will be blocked by RLS.
+      // The insert happens in otp.tsx after the user verifies their email.
+      router.push({
+        pathname: '/(auth)/otp',
+        params: {
+          email: email.trim(),
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+          matricNumber: matricNumber.trim().toUpperCase(),
+        },
       });
-
-      if (profileError) {
-        // Ignore duplicate key error (row already exists via DB trigger)
-        if (!profileError.message.includes('duplicate')) {
-          console.warn('Profile insert warning:', profileError.message);
-        }
-      }
-
-      // Pass required params to OTP screen
-      router.push({ pathname: '/(auth)/otp', params: { email: email.trim(), firstName: firstName.trim() } });
     }
   };
 

@@ -1,0 +1,26 @@
+{
+  "cli": {
+    "version": ">= 18.12.2",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal"
+    },
+    "preview": {
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://enrdpiuucxezdcivqron.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVucmRwaXV1Y3hlemRjaXZxcm9uIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxNjAwNDgsImV4cCI6MjA5MjczNjA0OH0.6dApjbd-915TXCU_Yk3QPGXBBHQckYFPt5AY4YtbhlM",
+        "EXPO_PUBLIC_NVIDIA_API_KEY": "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"
+      }
+    },
+    "production": {
+      "autoIncrement": true
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}
