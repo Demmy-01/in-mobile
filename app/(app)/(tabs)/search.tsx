@@ -11,10 +11,12 @@ import { formatNairaRange, NIGERIAN_LOCATIONS } from '@/constants/AppData';
 import { Search, SlidersHorizontal, MapPin, Clock, Bookmark, SearchX } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/store/authStore';
+import { computeLocalMatch } from '@/lib/matchScore';
 
 interface Listing {
   id: string;
   title: string;
+  description: string | null;
   location: string | null;
   salary_min: number | null;
   salary_max: number | null;
@@ -26,18 +28,17 @@ interface Listing {
   organisation_profiles: { name: string; logo_url: string | null } | null;
 }
 
-function computeMatch(listing: Listing, profileSkills: string[]): number {
-  if (!listing.required_skills?.length || !profileSkills?.length) return 70;
-  const required = listing.required_skills.map((s) => s.toLowerCase());
-  const has = profileSkills.map((s) => s.toLowerCase());
-  const overlap = required.filter((r) => has.includes(r)).length;
-  return Math.min(99, Math.round(70 + (overlap / required.length) * 29));
-}
+// computeMatch is replaced by the shared computeLocalMatch from @/lib/matchScore
 
 export default function SearchScreen() {
   const router = useRouter();
   const { profile } = useAuthStore();
   const profileSkills = profile?.skills ?? [];
+  const profileForMatch = {
+    skills: profileSkills,
+    department: profile?.department ?? '',
+    bio: profile?.bio,
+  };
 
   const [query, setQuery] = useState('');
   const [sortBy, setSortBy] = useState('match');
@@ -53,10 +54,10 @@ export default function SearchScreen() {
   const fetchListings = useCallback(async () => {
     const { data } = await supabase
       .from('internship_listings')
-      .select('*, organisation_profiles(name, logo_url)')
+      .select('id, title, description, location, salary_min, salary_max, is_siwes, created_at, required_skills, status, duration, organisation_profiles(name, logo_url)')
       .eq('status', 'ACTIVE')
       .order('created_at', { ascending: false });
-    if (data) setAllListings(data as Listing[]);
+    if (data) setAllListings(data as unknown as Listing[]);
   }, []);
 
   const fetchSaved = useCallback(async () => {
@@ -108,7 +109,7 @@ export default function SearchScreen() {
     }
   };
 
-  const withMatch = allListings.map((l) => ({ ...l, match: computeMatch(l, profileSkills) }));
+  const withMatch = allListings.map((l) => ({ ...l, match: computeLocalMatch(l, profileForMatch) }));
 
   const filtered = withMatch
     .filter((item) => {

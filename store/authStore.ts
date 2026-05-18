@@ -104,9 +104,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       }
 
       if (!data) {
-        console.warn('[fetchProfile] ⚠️  No student_profiles row found for userId:', userId);
-        console.warn('[fetchProfile] DEBUG: This means the profile insert during signup may have failed.');
-        console.warn('[fetchProfile] DEBUG: Check RLS policies on student_profiles table.');
+        console.log('[fetchProfile] ℹ️  No profile row yet for this user (expected during signup flow).');
         set({ profile: null });
         return;
       }

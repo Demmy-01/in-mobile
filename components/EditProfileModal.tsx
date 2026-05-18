@@ -8,7 +8,6 @@ import {
   TextInput,
   TouchableOpacity,
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Image,
@@ -21,6 +20,7 @@ import {
 import { Colors } from '@/constants/Colors';
 import { Radii } from '@/constants/theme';
 import { useAuthStore } from '@/store/authStore';
+import { useToastStore } from '@/store/toastStore';
 import { supabase } from '@/lib/supabase';
 
 const C = Colors.light;
@@ -32,6 +32,7 @@ interface Props {
 
 export default function EditProfileModal({ visible, onClose }: Props) {
   const { profile, fetchProfile } = useAuthStore();
+  const showToast = useToastStore((state) => state.showToast);
   const [isSaving, setIsSaving] = useState(false);
 
   const [firstName, setFirstName] = useState('');
@@ -95,7 +96,7 @@ export default function EditProfileModal({ visible, onClose }: Props) {
   ) => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permission needed', 'Allow photo library access to upload images.');
+      showToast('Allow photo library access to upload images.', 'error', 'Permission needed');
       return;
     }
 
@@ -147,7 +148,7 @@ export default function EditProfileModal({ visible, onClose }: Props) {
       setUri(publicUrl);
       await fetchProfile();
     } catch (err: any) {
-      Alert.alert('Upload failed', err.message ?? 'Something went wrong.');
+      showToast(err.message ?? 'Something went wrong.', 'error', 'Upload failed');
     } finally {
       setUploading(false);
     }
@@ -155,17 +156,17 @@ export default function EditProfileModal({ visible, onClose }: Props) {
 
   const handleSave = async () => {
     if (!firstName.trim()) {
-      Alert.alert('Required', 'First name cannot be empty.');
+      showToast('First name cannot be empty.', 'error', 'Required');
       return;
     }
     if (!lastName.trim()) {
-      Alert.alert('Required', 'Last name cannot be empty.');
+      showToast('Last name cannot be empty.', 'error', 'Required');
       return;
     }
 
     const userId = profile?.id;
     if (!userId) {
-      Alert.alert('Error', 'No user session found. Please sign out and sign in again.');
+      showToast('No user session found. Please sign out and sign in again.', 'error', 'Error');
       return;
     }
 
@@ -196,7 +197,7 @@ export default function EditProfileModal({ visible, onClose }: Props) {
     const { data: sessionData } = await supabase.auth.getSession();
     if (!sessionData.session) {
       setIsSaving(false);
-      Alert.alert('Session Expired', 'Your session has expired. Please sign out and sign in again.');
+      showToast('Your session has expired. Please sign out and sign in again.', 'error', 'Session Expired');
       return;
     }
     console.log('[EditProfile] Session uid:', sessionData.session.user.id);
@@ -216,15 +217,12 @@ export default function EditProfileModal({ visible, onClose }: Props) {
       console.error('[EditProfile] Error message:', error.message);
       console.error('[EditProfile] Error details:', error.details);
       console.error('[EditProfile] Error hint:', error.hint);
-      Alert.alert(
-        'Save Failed',
-        `Error: ${error.message}\n\nCode: ${error.code || 'unknown'}`,
-      );
+      showToast(`Error: ${error.message}\n\nCode: ${error.code || 'unknown'}`, 'error', 'Save Failed');
       return;
     }
 
     if (!data) {
-      Alert.alert('Save Failed', 'No data returned. The row may not exist or RLS is blocking the update.');
+      showToast('No data returned. The row may not exist or RLS is blocking the update.', 'error', 'Save Failed');
       return;
     }
 
@@ -234,9 +232,8 @@ export default function EditProfileModal({ visible, onClose }: Props) {
     const { setProfile } = useAuthStore.getState();
     setProfile({ ...profile!, ...data });
 
-    Alert.alert('Saved!', 'Your profile has been updated.', [
-      { text: 'OK', onPress: onClose },
-    ]);
+    showToast('Your profile has been updated.', 'success', 'Saved!');
+    onClose();
   };
 
   return (

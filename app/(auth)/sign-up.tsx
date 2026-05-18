@@ -10,17 +10,20 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { User, IdCard, Mail, Key, Eye, EyeOff, Check } from 'lucide-react-native';
 import Svg, { Path, G, Rect, ClipPath, Defs } from 'react-native-svg';
+import { useToastStore } from '@/store/toastStore';
+import { useAuthStore } from '@/store/authStore';
 
 type Tab = 'sign-in' | 'sign-up';
 
 export default function SignUpScreen() {
   const router = useRouter();
+  const showToast = useToastStore((state) => state.showToast);
+  const { setSession, fetchProfile } = useAuthStore();
   const [activeTab, setActiveTab] = useState<Tab>('sign-up');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -31,18 +34,47 @@ export default function SignUpScreen() {
   const [agreed, setAgreed] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+  const [errors, setErrors] = useState<Record<string, boolean>>({});
 
   const handleSignUp = async () => {
-    if (!firstName.trim() || !lastName.trim() || !matricNumber.trim() || !email.trim() || !password) {
-      Alert.alert('Validation Error', 'Please fill in all fields');
+    const signupErrors = {
+      firstName: !firstName.trim(),
+      lastName: !lastName.trim(),
+      matricNumber: !matricNumber.trim(),
+      email: !email.trim(),
+      password: !password,
+    };
+
+    setErrors(signupErrors);
+
+    const hasErrors = Object.values(signupErrors).some(val => val);
+    if (hasErrors) {
+      showToast('Please fill in all empty fields', 'error', 'Validation Error');
       return;
     }
     if (!agreed) {
-      Alert.alert('Validation Error', 'You must agree to the terms and conditions');
+      showToast('You must agree to the terms and conditions', 'error', 'Validation Error');
       return;
     }
 
     setIsLoading(true);
+
+    // Block organisation accounts from registering as students
+    const { data: orgProfile } = await supabase
+      .from('organisation_profiles')
+      .select('id')
+      .eq('email', email.trim())
+      .maybeSingle();
+
+    if (orgProfile) {
+      setIsLoading(false);
+      showToast(
+        'This email is already registered as an Organisation account. Please use the Organisation Portal.',
+        'error',
+        'Wrong Portal'
+      );
+      return;
+    }
 
     const { data, error } = await supabase.auth.signUp({
       email: email.trim(),
@@ -60,7 +92,7 @@ export default function SignUpScreen() {
     setIsLoading(false);
 
     if (error) {
-      Alert.alert('Registration Failed', error.message);
+      showToast(error.message, 'error', 'Registration Failed');
     } else if (data?.user) {
       // Do NOT insert the profile here — Supabase returns no session before
       // email confirmation, so any insert will be blocked by RLS.
@@ -119,64 +151,79 @@ export default function SignUpScreen() {
             <View style={styles.formContainer}>
               
               {/* First Name Input */}
-              <View style={styles.inputWrapper}>
+              <View style={[styles.inputWrapper, errors.firstName && styles.inputWrapperError]}>
                 <User size={18} color="#000" style={styles.inputIcon} />
                 <TextInput
                   style={styles.input}
                   placeholder="First name"
                   placeholderTextColor="#A0A0A0"
                   value={firstName}
-                  onChangeText={setFirstName}
+                  onChangeText={(val) => {
+                    setFirstName(val);
+                    if (errors.firstName) setErrors(prev => ({ ...prev, firstName: false }));
+                  }}
                 />
               </View>
 
               {/* Last Name Input */}
-              <View style={styles.inputWrapper}>
+              <View style={[styles.inputWrapper, errors.lastName && styles.inputWrapperError]}>
                 <User size={18} color="#000" style={styles.inputIcon} />
                 <TextInput
                   style={styles.input}
                   placeholder="Last name"
                   placeholderTextColor="#A0A0A0"
                   value={lastName}
-                  onChangeText={setLastName}
+                  onChangeText={(val) => {
+                    setLastName(val);
+                    if (errors.lastName) setErrors(prev => ({ ...prev, lastName: false }));
+                  }}
                 />
               </View>
 
               {/* Matric Number Input */}
-              <View style={styles.inputWrapper}>
+              <View style={[styles.inputWrapper, errors.matricNumber && styles.inputWrapperError]}>
                 <IdCard size={18} color="#000" style={styles.inputIcon} />
                 <TextInput
                   style={styles.input}
                   placeholder="Matric_No"
                   placeholderTextColor="#A0A0A0"
                   value={matricNumber}
-                  onChangeText={setMatricNumber}
+                  onChangeText={(val) => {
+                    setMatricNumber(val);
+                    if (errors.matricNumber) setErrors(prev => ({ ...prev, matricNumber: false }));
+                  }}
                   autoCapitalize="characters"
                 />
               </View>
               {/* Email Input */}
-              <View style={styles.inputWrapper}>
+              <View style={[styles.inputWrapper, errors.email && styles.inputWrapperError]}>
                 <Mail size={18} color="#000" style={styles.inputIcon} />
                 <TextInput
                   style={styles.input}
                   placeholder="Email"
                   placeholderTextColor="#A0A0A0"
                   value={email}
-                  onChangeText={setEmail}
+                  onChangeText={(val) => {
+                    setEmail(val);
+                    if (errors.email) setErrors(prev => ({ ...prev, email: false }));
+                  }}
                   keyboardType="email-address"
                   autoCapitalize="none"
                 />
               </View>
 
               {/* Password Input */}
-              <View style={styles.inputWrapper}>
+              <View style={[styles.inputWrapper, errors.password && styles.inputWrapperError]}>
                 <Key size={18} color="#000" style={styles.inputIcon} />
                 <TextInput
                   style={styles.input}
                   placeholder="Password"
                   placeholderTextColor="#A0A0A0"
                   value={password}
-                  onChangeText={setPassword}
+                  onChangeText={(val) => {
+                    setPassword(val);
+                    if (errors.password) setErrors(prev => ({ ...prev, password: false }));
+                  }}
                   secureTextEntry={!showPassword}
                 />
                 <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeBtn}>
@@ -222,9 +269,18 @@ export default function SignUpScreen() {
                 disabled={isGoogleLoading}
                 onPress={async () => {
                   setIsGoogleLoading(true);
-                  const { error } = await signInWithGoogle();
+                  const { error, session } = await signInWithGoogle();
                   setIsGoogleLoading(false);
-                  if (error) Alert.alert('Google Sign-In Failed', error);
+                  if (error) {
+                    showToast(error, 'error', 'Google Sign-In Failed');
+                  } else {
+                    if (session) {
+                      setSession(session);
+                      await fetchProfile();
+                    }
+                    showToast('Successfully authenticated with Google!', 'success', 'Welcome! 🎉');
+                    router.replace('/(app)/(tabs)/home');
+                  }
                 }}
               >
                 <Svg width={22} height={22} viewBox="0 0 48 48">
@@ -337,6 +393,11 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 16,
     height: 56,
+    borderWidth: 1.5,
+    borderColor: 'transparent',
+  },
+  inputWrapperError: {
+    borderColor: '#EF4444',
   },
   inputIcon: {
     marginRight: 12,

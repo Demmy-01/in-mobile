@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   Modal, View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Switch, TextInput, Alert, ActivityIndicator, Linking, KeyboardAvoidingView, Platform,
+  Switch, TextInput, ActivityIndicator, Linking, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import {
   X, Bell, Lock, Key, HelpCircle, Info, ChevronRight, Mail, MessageSquare,
@@ -9,6 +9,7 @@ import {
 import { Colors } from '@/constants/Colors';
 import { Radii, Typography } from '@/constants/theme';
 import { supabase } from '@/lib/supabase';
+import { useToastStore } from '@/store/toastStore';
 
 const C = Colors.light;
 
@@ -46,6 +47,7 @@ function RowItem({ label, sub, right }: { label: string; sub?: string; right?: R
 
 /* ── Notification Preferences ── */
 export function NotificationsModal({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+  const showToast = useToastStore((state) => state.showToast);
   const [appUpdates, setAppUpdates] = useState(true);
   const [newListings, setNewListings] = useState(true);
   const [statusChanges, setStatusChanges] = useState(true);
@@ -66,7 +68,7 @@ export function NotificationsModal({ visible, onClose }: { visible: boolean; onC
         <View style={sh.divider} />
         <RowItem label="Weekly email digest" sub="Summary of activity sent to your email" right={<Switch value={emailDigest} onValueChange={setEmailDigest} trackColor={{ true: C.accentBlue }} thumbColor="#fff" />} />
       </SectionCard>
-      <TouchableOpacity style={sh.saveBtn} onPress={() => { Alert.alert('Saved', 'Notification preferences updated.'); onClose(); }}>
+      <TouchableOpacity style={sh.saveBtn} onPress={() => { showToast('Notification preferences updated.', 'success', 'Saved'); onClose(); }}>
         <Text style={sh.saveBtnText}>Save Preferences</Text>
       </TouchableOpacity>
     </Sheet>
@@ -75,6 +77,7 @@ export function NotificationsModal({ visible, onClose }: { visible: boolean; onC
 
 /* ── Privacy Settings ── */
 export function PrivacyModal({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+  const showToast = useToastStore((state) => state.showToast);
   const [profileVisible, setProfileVisible] = useState(true);
   const [cvVisible, setCvVisible] = useState(false);
   const [showGpa, setShowGpa] = useState(false);
@@ -92,7 +95,7 @@ export function PrivacyModal({ visible, onClose }: { visible: boolean; onClose: 
         <View style={sh.divider} />
         <RowItem label="Allow direct contact" sub="Organisations can message you directly" right={<Switch value={allowContact} onValueChange={setAllowContact} trackColor={{ true: C.accentBlue }} thumbColor="#fff" />} />
       </SectionCard>
-      <TouchableOpacity style={sh.saveBtn} onPress={() => { Alert.alert('Saved', 'Privacy settings updated.'); onClose(); }}>
+      <TouchableOpacity style={sh.saveBtn} onPress={() => { showToast('Privacy settings updated.', 'success', 'Saved'); onClose(); }}>
         <Text style={sh.saveBtnText}>Save Settings</Text>
       </TouchableOpacity>
     </Sheet>
@@ -101,18 +104,19 @@ export function PrivacyModal({ visible, onClose }: { visible: boolean; onClose: 
 
 /* ── Change Password ── */
 export function ChangePasswordModal({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+  const showToast = useToastStore((state) => state.showToast);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
   const handleChange = async () => {
-    if (newPassword.length < 6) { Alert.alert('Too short', 'Password must be at least 6 characters.'); return; }
-    if (newPassword !== confirmPassword) { Alert.alert('Mismatch', 'Passwords do not match.'); return; }
+    if (newPassword.length < 6) { showToast('Password must be at least 6 characters.', 'error', 'Too Short'); return; }
+    if (newPassword !== confirmPassword) { showToast('Passwords do not match.', 'error', 'Mismatch'); return; }
     setIsSaving(true);
     const { error } = await supabase.auth.updateUser({ password: newPassword });
     setIsSaving(false);
-    if (error) { Alert.alert('Error', error.message); return; }
-    Alert.alert('Done!', 'Your password has been updated.');
+    if (error) { showToast(error.message, 'error', 'Error'); return; }
+    showToast('Your password has been updated.', 'success', 'Done!');
     setNewPassword(''); setConfirmPassword('');
     onClose();
   };
@@ -157,7 +161,7 @@ export function ChangePasswordModal({ visible, onClose }: { visible: boolean; on
               const { data: { user } } = await supabase.auth.getUser();
               if (!user?.email) return;
               await supabase.auth.resetPasswordForEmail(user.email);
-              Alert.alert('Sent!', 'Check your email for a password reset link.');
+              showToast('Check your email for a password reset link.', 'success', 'Sent!');
             }}
           >
             <Text style={sh.linkBtnText}>Send reset link to my email instead</Text>
@@ -170,6 +174,7 @@ export function ChangePasswordModal({ visible, onClose }: { visible: boolean; on
 
 /* ── Help & Support ── */
 export function HelpModal({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+  const showToast = useToastStore((state) => state.showToast);
   const faqs = [
     { q: 'How do I apply for an internship?', a: 'Go to the Search tab, find a listing you like, and tap "Apply Now". Fill in your cover letter and submit.' },
     { q: 'How is my match score calculated?', a: 'Match scores are based on your skills, department, and level compared to the internship requirements.' },
@@ -203,7 +208,7 @@ export function HelpModal({ visible, onClose }: { visible: boolean; onClose: () 
           <ChevronRight size={16} color={C.textMuted} />
         </TouchableOpacity>
         <View style={sh.divider} />
-        <TouchableOpacity style={sh.row} onPress={() => Alert.alert('Coming Soon', 'Live chat will be available in the next update.')}>
+        <TouchableOpacity style={sh.row} onPress={() => showToast('Live chat will be available in the next update.', 'info', 'Coming Soon')}>
           <MessageSquare size={18} color={C.accentBlue} />
           <View style={{ flex: 1, marginLeft: 12 }}>
             <Text style={sh.rowLabel}>Live Chat</Text>
@@ -218,6 +223,7 @@ export function HelpModal({ visible, onClose }: { visible: boolean; onClose: () 
 
 /* ── About MIMS ── */
 export function AboutModal({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+  const showToast = useToastStore((state) => state.showToast);
   return (
     <Sheet visible={visible} onClose={onClose} title="About MIMS">
       <View style={[sh.card, { alignItems: 'center', paddingVertical: 28 }]}>
@@ -234,12 +240,12 @@ export function AboutModal({ visible, onClose }: { visible: boolean; onClose: ()
         </Text>
       </SectionCard>
       <SectionCard>
-        <TouchableOpacity style={sh.row} onPress={() => Alert.alert('Terms', 'Full terms of service will be available soon.')}>
+        <TouchableOpacity style={sh.row} onPress={() => showToast('Full terms of service will be available soon.', 'info', 'Terms')}>
           <Text style={sh.rowLabel}>Terms of Service</Text>
           <ChevronRight size={16} color={C.textMuted} />
         </TouchableOpacity>
         <View style={sh.divider} />
-        <TouchableOpacity style={sh.row} onPress={() => Alert.alert('Privacy', 'Full privacy policy will be available soon.')}>
+        <TouchableOpacity style={sh.row} onPress={() => showToast('Full privacy policy will be available soon.', 'info', 'Privacy')}>
           <Text style={sh.rowLabel}>Privacy Policy</Text>
           <ChevronRight size={16} color={C.textMuted} />
         </TouchableOpacity>

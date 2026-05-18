@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, ActivityIndicator, Alert,
+  TextInput, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -11,6 +11,7 @@ import * as Sharing from 'expo-sharing';
 import { Colors } from '@/constants/Colors';
 import { Typography, Radii } from '@/constants/theme';
 import { useAuthStore } from '@/store/authStore';
+import { useToastStore } from '@/store/toastStore';
 import { supabase } from '@/lib/supabase';
 import { generateCVWithAI, CVData, EducationEntry, ExperienceEntry, ProjectEntry } from '@/lib/nvidia';
 import { EducationStep, ExperienceStep, ProjectsStep, EducationDraft, ExperienceDraft, ProjectDraft } from '@/components/CVSteps';
@@ -22,6 +23,7 @@ const STEPS: Step[] = ['review', 'role', 'education', 'experience', 'projects', 
 
 export default function CVBuilderScreen() {
   const { profile } = useAuthStore();
+  const showToast = useToastStore((state) => state.showToast);
   const [step, setStep] = useState<Step>('review');
   const [targetRole, setTargetRole] = useState('');
   const [cvData, setCvData] = useState<CVData | null>(null);
@@ -60,7 +62,7 @@ export default function CVBuilderScreen() {
 
   const handleGenerate = async () => {
     if (!targetRole.trim()) {
-      Alert.alert('Required', 'Please enter the role you are targeting.');
+      showToast('Please enter the role you are targeting.', 'error', 'Required');
       return;
     }
     if (!profile?.id) return;
@@ -151,12 +153,8 @@ export default function CVBuilderScreen() {
     } catch (err: any) {
       const msg = err?.message ?? 'Unknown error. Please try again.';
       console.error('[CVBuilder] Generation error:', msg);
-      Alert.alert(
-        'Generation Failed',
-        msg,
-        [{ text: 'Try Again', onPress: () => setStep('role') }]
-      );
-      // Don't auto-navigate — let the user dismiss the alert first
+      showToast(msg, 'error', 'Generation Failed');
+      setStep('role');
     }
   };
 
@@ -230,10 +228,10 @@ export default function CVBuilderScreen() {
       if (canShare) {
         await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: 'Save or Share your CV' });
       } else {
-        Alert.alert('Saved', `PDF saved to: ${uri}`);
+        showToast(`PDF saved to: ${uri}`, 'success', 'Saved');
       }
     } catch (e: any) {
-      Alert.alert('Error', e?.message ?? 'Could not generate PDF.');
+      showToast(e?.message ?? 'Could not generate PDF.', 'error', 'Error');
     }
   };
 
@@ -368,7 +366,7 @@ export default function CVBuilderScreen() {
                 <Text style={s.backBtnText}>← Back</Text>
               </TouchableOpacity>
               <TouchableOpacity style={[s.primaryBtn, { flex: 1 }]} onPress={() => {
-                if (!targetRole.trim()) { Alert.alert('Required', 'Please enter the role you are targeting.'); return; }
+                if (!targetRole.trim()) { showToast('Please enter the role you are targeting.', 'error', 'Required'); return; }
                 setStep('education');
               }}>
                 <LinearGradient colors={[C.accentBlue, C.primaryBlue]} style={s.primaryBtnGrad} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
@@ -597,7 +595,7 @@ export default function CVBuilderScreen() {
                     { onConflict: 'student_id' }
                   );
                   if (!error) { setCvSaved(true); setTimeout(() => setCvSaved(false), 4000); }
-                  else Alert.alert('Save failed', error.message);
+                  else showToast(error.message, 'error', 'Save Failed');
                 }}
               >
                 <CheckCircle size={16} color={C.primaryBlue} />

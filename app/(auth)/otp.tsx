@@ -8,7 +8,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
-  Alert,
 } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
@@ -16,9 +15,11 @@ import { Colors } from "@/constants/Colors";
 import { Typography, Radii } from "@/constants/theme";
 import { supabase } from "@/lib/supabase";
 import { useAuthStore } from "@/store/authStore";
+import { useToastStore } from "@/store/toastStore";
 
 export default function OtpScreen() {
   const { setSession, fetchProfile, signOut } = useAuthStore();
+  const showToast = useToastStore((state) => state.showToast);
   const router = useRouter();
   const { email, firstName, lastName, matricNumber } = useLocalSearchParams<{
     email: string;
@@ -52,7 +53,7 @@ export default function OtpScreen() {
   const handleVerify = async () => {
     const code = otp.join("");
     if (code.length < 8) {
-      Alert.alert("Enter 8-digit code");
+      showToast("Please enter the complete 8-digit verification code.", "error", "Validation Error");
       return;
     }
     setIsLoading(true);
@@ -64,7 +65,7 @@ export default function OtpScreen() {
 
     if (error) {
       setIsLoading(false);
-      Alert.alert("Verification Failed", error.message);
+      showToast(error.message, "error", "Verification Failed");
       return;
     }
 
@@ -77,51 +78,40 @@ export default function OtpScreen() {
 
     if (!session) {
       setIsLoading(false);
-      Alert.alert(
-        "Session Error",
-        "Failed to create session. Please try again.",
-      );
+      showToast("Failed to create session. Please try again.", "error", "Session Error");
       return;
     }
 
-    // 1. FIRST: Insert profile row with .select() to verify it was created
-    const { data: profileData, error: profileError } = await supabase
-      .from("student_profiles")
-      .upsert(
-        {
-          id: session.user.id,
-          first_name: firstName?.trim() ?? "",
-          last_name: lastName?.trim() ?? "",
-          matric_number: matricNumber?.trim() ?? null,
-          email: email?.trim() ?? session.user.email ?? "",
-          skills: [],
-          hobbies: [],
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "id" },
-      )
-      .select()
-      .single();
+    // 1. Save profile via RPC — the function atomically removes any orphaned
+    //    row that shares the same matric_number (different user id) before
+    //    upserting, preventing the "duplicate key … matric_number" error that
+    //    a plain upsert can't avoid when ghost rows exist from prior attempts.
+    console.log("[OTP] Saving profile via RPC for userId:", session.user.id);
+    const { data: rpcData, error: profileError } = await supabase.rpc(
+      "save_student_profile",
+      {
+        p_id:            session.user.id,
+        p_first_name:    firstName?.trim()     ?? "",
+        p_last_name:     lastName?.trim()      ?? "",
+        p_email:         email?.trim()         ?? session.user.email ?? "",
+        p_matric_number: matricNumber?.trim()  ?? null,
+      },
+    );
+
+    // rpcData is the JSON row returned by the function
+    const profileData = rpcData ?? null;
 
     if (profileError) {
       console.error(
-        "[OTP] Profile upsert failed:",
+        "[OTP] Profile RPC failed:",
         profileError.code,
         profileError.message,
       );
 
-      // Check if it's an RLS policy error
       if (profileError.code === "42501") {
-        Alert.alert(
-          "Database Configuration Error",
-          "The student_profiles table RLS policy is not configured correctly. Please contact support.\n\nError: Row-level security policy violation",
-        );
+        showToast("Row-level security policy prevented saving your profile. Please contact support.", "error", "Database Configuration Error");
       } else {
-        Alert.alert(
-          "Profile Creation Failed",
-          `Could not save your profile: ${profileError.message}`,
-        );
+        showToast(`Could not save your profile: ${profileError.message}`, "error", "Profile Creation Failed");
       }
       setIsLoading(false);
       return;
@@ -129,29 +119,23 @@ export default function OtpScreen() {
 
     console.log("[OTP] ✅ Profile created successfully:", profileData?.id);
 
-    // 2. Clear session from store and Supabase (for fresh login)
+    // 2. Direct authentication: Set the session in the store and fetch the profile
     try {
-      // Call signOut from store to clear both store AND supabase
-      await signOut();
-      console.log("[OTP] ✅ Session cleared - ready for fresh login");
-    } catch (signOutErr) {
-      console.warn("[OTP] Sign out error:", signOutErr);
-      // Continue anyway - just redirect
+      setSession(session);
+      await fetchProfile();
+      console.log("[OTP] ✅ Session authenticated and profile fetched successfully");
+    } catch (authErr) {
+      console.error("[OTP] Direct auth initialization failed:", authErr);
     }
 
     setIsLoading(false);
 
-    // 3. Small delay to ensure session is cleared before navigation
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    // 3. Welcome success toast notification
+    showToast("Welcome to InternLink!", "success", "Email Verified! 🎉");
 
-    // 4. Redirect to sign-in page where user can log in with their credentials
-    router.replace({
-      pathname: "/(auth)/sign-in",
-      params: {
-        email: email?.trim() ?? "",
-        message: "Email verified! Please sign in with your credentials.",
-      },
-    });
+    // 4. Small delay for animations, then transition directly to the dashboard home
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    router.replace("/(app)/(tabs)/home");
   };
 
   const handleResend = async () => {

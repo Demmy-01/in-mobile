@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIndicator,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator,
   Image, ImageBackground, Modal, RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -14,6 +14,7 @@ import {
 import { Colors } from '@/constants/Colors';
 import { Typography, Radii } from '@/constants/theme';
 import { useAuthStore } from '@/store/authStore';
+import { useToastStore } from '@/store/toastStore';
 import { supabase } from '@/lib/supabase';
 import EditProfileModal from '@/components/EditProfileModal';
 import {
@@ -58,6 +59,7 @@ const STATUS_COLORS: Record<string, string> = {
 export default function ProfileScreen() {
   const router = useRouter();
   const { profile, signOut, fetchProfile } = useAuthStore();
+  const showConfirm = useToastStore((state) => state.showConfirm);
 
   const [activeTab, setActiveTab] = useState<'applications' | 'saved' | 'cvs'>('applications');
   const [recentApps, setRecentApps] = useState<MiniApplication[]>([]);
@@ -133,10 +135,16 @@ export default function ProfileScreen() {
   useEffect(() => { fetchTabData(); }, [fetchTabData]);
 
   const handleSignOut = () => {
-    Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Sign Out', style: 'destructive', onPress: () => { signOut(); router.replace('/(auth)/sign-in'); } },
-    ]);
+    showConfirm({
+      title: 'Sign Out',
+      description: 'Are you sure you want to sign out of your account?',
+      confirmLabel: 'Sign Out',
+      cancelLabel: 'Cancel',
+      onConfirm: async () => {
+        await signOut();
+        router.replace('/(auth)/sign-in');
+      },
+    });
   };
 
   const unsaveListing = async (savedId: string) => {

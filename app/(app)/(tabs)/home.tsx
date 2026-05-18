@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, FlatList, ActivityIndicator, RefreshControl, Image,
+  TextInput, FlatList, ActivityIndicator, RefreshControl, Image, Platform,
+  Modal, Animated,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -12,9 +14,28 @@ import { useAuthStore } from '@/store/authStore';
 import {
   INTERNSHIP_CATEGORIES, formatNairaRange, getGreeting,
 } from '@/constants/AppData';
-import { Search, SlidersHorizontal, MapPin, Clock, Bookmark, SearchX } from 'lucide-react-native';
+import { Search, SlidersHorizontal, MapPin, Clock, Bookmark, SearchX, Bell, Megaphone, X, CheckCheck } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
 import { evaluateInternshipMatches } from '@/lib/nvidia';
+import { computeLocalMatch } from '@/lib/matchScore';
+
+const DISMISSED_KEY = 'il_student_dismissed_announcements';
+const READ_KEY = 'il_student_read_announcements';
+
+async function loadSet(key: string): Promise<Set<string>> {
+  try {
+    const raw = await AsyncStorage.getItem(key);
+    return raw ? new Set(JSON.parse(raw)) : new Set<string>();
+  } catch {
+    return new Set<string>();
+  }
+}
+
+async function saveSet(key: string, ids: Set<string>) {
+  try {
+    await AsyncStorage.setItem(key, JSON.stringify([...ids]));
+  } catch {}
+}
 
 // ---- Types ----
 interface Listing {
@@ -32,108 +53,6 @@ interface Listing {
     name: string;
     logo_url: string | null;
   } | null;
-}
-
-// ── Semantic skill synonym map ──────────────────────────────────────────────
-// Maps common skill variants to a canonical group, so "ReactJS" matches "React"
-const SKILL_SYNONYMS: Record<string, string[]> = {
-  javascript: ['js', 'es6', 'es2015', 'node', 'nodejs', 'typescript', 'ts'],
-  react:      ['reactjs', 'react.js', 'react native', 'nextjs', 'next.js'],
-  python:     ['django', 'flask', 'fastapi', 'pandas', 'numpy', 'pytorch', 'tensorflow'],
-  design:     ['ui', 'ux', 'ui/ux', 'figma', 'adobe xd', 'sketch', 'canva', 'illustrator'],
-  frontend:   ['html', 'css', 'sass', 'tailwind', 'bootstrap', 'vue', 'angular', 'svelte'],
-  backend:    ['api', 'rest', 'graphql', 'sql', 'database', 'postgres', 'mysql', 'mongodb'],
-  mobile:     ['android', 'ios', 'flutter', 'swift', 'kotlin', 'expo'],
-  data:       ['excel', 'power bi', 'tableau', 'analytics', 'machine learning', 'ml', 'ai'],
-  marketing:  ['seo', 'sem', 'social media', 'content', 'copywriting', 'ads', 'campaigns'],
-  finance:    ['accounting', 'bookkeeping', 'financial analysis', 'excel', 'quickbooks'],
-};
-
-// Checks if two skill strings are semantically equivalent
-function skillsMatch(a: string, b: string): boolean {
-  if (a.includes(b) || b.includes(a)) return true;
-  for (const [, synonyms] of Object.entries(SKILL_SYNONYMS)) {
-    if (synonyms.some(s => a.includes(s)) && synonyms.some(s => b.includes(s))) return true;
-  }
-  return false;
-}
-
-// Department-to-role keyword map
-const DEPT_ROLE_MAP: Record<string, string[]> = {
-  'computer science':       ['software', 'developer', 'engineer', 'frontend', 'backend', 'fullstack', 'data', 'mobile', 'web', 'tech'],
-  'information technology': ['it', 'support', 'network', 'systems', 'cloud', 'security', 'devops', 'tech'],
-  'electrical engineering': ['hardware', 'embedded', 'electronics', 'iot', 'circuit', 'automation', 'control'],
-  'mechanical engineering': ['cad', 'manufacturing', 'production', 'design', 'maintenance', 'fabrication'],
-  'business administration':['management', 'operations', 'strategy', 'admin', 'business', 'project'],
-  'accounting':             ['finance', 'audit', 'tax', 'accounting', 'bookkeeping', 'financial'],
-  'economics':              ['research', 'analysis', 'finance', 'policy', 'data', 'economics'],
-  'mass communication':     ['media', 'journalism', 'content', 'pr', 'marketing', 'communications', 'social media'],
-  'marketing':              ['marketing', 'brand', 'sales', 'digital', 'content', 'advertising', 'campaigns'],
-  'law':                    ['legal', 'compliance', 'contract', 'corporate', 'counsel', 'paralegal'],
-  'medicine':               ['health', 'medical', 'clinical', 'research', 'pharma', 'biotech'],
-};
-
-/**
- * Multi-factor weighted local match score (runs instantly, no network).
- * Scoring breakdown (max 99):
- *   Skills match (direct + semantic)  → up to 40 pts
- *   Department ↔ role alignment       → up to 25 pts
- *   Bio / description keyword match   → up to 15 pts
- *   Skills mentioned in job text      → up to 10 pts
- *   Base score (everyone gets this)   →      9 pts
- */
-function computeLocalMatch(
-  listing: Listing,
-  profile: { skills: string[]; department: string; bio?: string }
-): number {
-  const titleLower = (listing.title || '').toLowerCase();
-  const deptLower  = (profile.department || '').toLowerCase();
-  const pSkills    = (profile.skills || []).map(s => s.toLowerCase());
-  const rSkills    = (listing.required_skills || []).map(s => s.toLowerCase());
-  const descLower  = (listing.description || '').toLowerCase();
-  const bioLower   = (profile.bio || '').toLowerCase();
-  const allJobText = `${titleLower} ${descLower}`;
-
-  let score = 9; // base — everyone gets this
-
-  // ── 1. Skills match (up to 40 pts) ──────────────────────────────────────
-  if (rSkills.length > 0 && pSkills.length > 0) {
-    const matched = rSkills.filter(r => pSkills.some(p => skillsMatch(p, r))).length;
-    score += Math.round((matched / rSkills.length) * 40);
-  } else if (pSkills.length > 0) {
-    // No required_skills set — check profile skills against job text
-    const matched = pSkills.filter(s => allJobText.includes(s)).length;
-    score += Math.min(20, matched * 7);
-  }
-
-  // ── 2. Department ↔ role alignment (up to 25 pts) ───────────────────────
-  let deptScore = 0;
-  // Exact department word in title/desc
-  const deptWords = deptLower.split(/[\s/]+/).filter(w => w.length > 3);
-  for (const w of deptWords) {
-    if (allJobText.includes(w)) deptScore = Math.max(deptScore, 15);
-  }
-  // Semantic department → role mapping
-  for (const [deptKey, roleKeywords] of Object.entries(DEPT_ROLE_MAP)) {
-    if (deptLower.includes(deptKey)) {
-      const overlap = roleKeywords.filter(kw => allJobText.includes(kw)).length;
-      deptScore = Math.max(deptScore, Math.min(25, overlap * 8));
-    }
-  }
-  score += deptScore;
-
-  // ── 3. Bio keyword match (up to 15 pts) ─────────────────────────────────
-  if (bioLower.length > 10) {
-    const bioWords = bioLower.split(/\s+/).filter(w => w.length > 4);
-    const bioMatches = bioWords.filter(w => allJobText.includes(w)).length;
-    score += Math.min(15, bioMatches * 3);
-  }
-
-  // ── 4. Profile skills appear in job text (up to 10 pts) ─────────────────
-  const skillsInText = pSkills.filter(s => allJobText.includes(s)).length;
-  score += Math.min(10, skillsInText * 4);
-
-  return Math.min(99, Math.max(9, score));
 }
 
 
@@ -155,7 +74,53 @@ export default function HomeScreen() {
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
   const [aiMatchScores, setAiMatchScores] = useState<Record<string, number>>({});
   const [aiStatus, setAiStatus] = useState<'idle' | 'loading' | 'success' | 'failed'>('idle');
-  const aiMatchFiredRef = useRef(false); // prevent double-fire
+  const aiMatchFiredRef = useRef(false);
+
+  // Announcements
+  const [announcements, setAnnouncements] = useState<{ id: string; title: string; body: string; created_at: string }[]>([]);
+  const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
+  const [readIds, setReadIds] = useState<Set<string>>(new Set());
+  const [showNotifModal, setShowNotifModal] = useState(false);
+  const modalAnim = useRef(new Animated.Value(0)).current;
+
+  // Derived
+  const activeBanners = announcements.filter(a => !dismissedIds.has(a.id));
+  const dismissedAnnouncements = announcements.filter(a => dismissedIds.has(a.id));
+  const unreadCount = dismissedAnnouncements.filter(a => !readIds.has(a.id)).length;
+
+  // Load persisted sets on mount
+  useEffect(() => {
+    loadSet(DISMISSED_KEY).then(s => setDismissedIds(s));
+    loadSet(READ_KEY).then(s => setReadIds(s));
+  }, []);
+
+  const openNotifModal = () => {
+    setShowNotifModal(true);
+    Animated.spring(modalAnim, { toValue: 1, useNativeDriver: true, friction: 8, tension: 80 }).start();
+  };
+
+  const closeNotifModal = () => {
+    Animated.timing(modalAnim, { toValue: 0, duration: 220, useNativeDriver: true }).start(() => setShowNotifModal(false));
+  };
+
+  const dismissAnnouncement = async (id: string) => {
+    const next = new Set(dismissedIds).add(id);
+    setDismissedIds(next);
+    await saveSet(DISMISSED_KEY, next);
+  };
+
+  const markAsRead = async (id: string) => {
+    const next = new Set(readIds).add(id);
+    setReadIds(next);
+    await saveSet(READ_KEY, next);
+  };
+
+  const markAllAsRead = async () => {
+    const next = new Set(readIds);
+    dismissedAnnouncements.forEach(a => next.add(a.id));
+    setReadIds(next);
+    await saveSet(READ_KEY, next);
+  };
 
   const firstName = profile?.first_name ?? 'Student';
   const avatarUrl = profile?.avatar_url ?? null;
@@ -180,7 +145,6 @@ export default function HomeScreen() {
     if (!profile || listings.length === 0) return;
 
     aiMatchFiredRef.current = true;
-    setAiStatus('loading');
 
     const profileForLocal = { skills: profile.skills ?? [], department: profile.department ?? '', bio: profile.bio };
 
@@ -190,6 +154,16 @@ export default function HomeScreen() {
       localScores[l.id] = computeLocalMatch(l, profileForLocal);
     }
     setAiMatchScores(localScores);
+
+    // NVIDIA API is blocked by CORS when running in a web browser (localhost).
+    // Skip the AI call on web — local scores are already shown above.
+    // On Android / iOS devices there is no CORS restriction, so the call proceeds normally.
+    if (Platform.OS === 'web') {
+      setAiStatus('success');
+      return;
+    }
+
+    setAiStatus('loading');
 
     // Sort top 10 by local score to send to AI
     const top10 = [...listings]
@@ -238,18 +212,48 @@ export default function HomeScreen() {
     }
   }, [profile?.id]);
 
+  const fetchAnnouncements = useCallback(async () => {
+    try {
+      const { data } = await supabase
+        .from('announcements')
+        .select('id, title, body, created_at')
+        .eq('target_students', true)
+        .order('created_at', { ascending: false })
+        .limit(3);
+      if (data) setAnnouncements(data);
+    } catch {
+      // announcements table may not exist yet — silently ignore
+    }
+  }, []);
+
   useEffect(() => {
     const load = async () => {
       setIsLoading(true);
-      await Promise.all([fetchListings(), fetchSaved()]);
+      await Promise.all([fetchListings(), fetchSaved(), fetchAnnouncements()]);
       setIsLoading(false);
     };
     load();
-  }, [fetchListings, fetchSaved]);
+
+    // Subscribe to announcements realtime changes
+    const channel = supabase
+      .channel('announcements_realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'announcements' },
+        () => {
+          fetchAnnouncements();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [fetchListings, fetchSaved, fetchAnnouncements]);
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await Promise.all([fetchListings(), fetchSaved()]);
+    await Promise.all([fetchListings(), fetchSaved(), fetchAnnouncements()]);
     setRefreshing(false);
   };
 
@@ -278,9 +282,11 @@ export default function HomeScreen() {
       ? aiMatchScores[l.id]
       : computeLocalMatch(l, profileForMatch)
   }));
-  const featured = withMatch.slice(0, 3);
-  const recommended = [...withMatch].sort((a, b) => b.match - a.match).slice(0, 6);
-  const recent = withMatch.slice(0, 4);
+  // Sort by match score for featured and recommended
+  const sortedByMatch = [...withMatch].sort((a, b) => b.match - a.match);
+  const featured = sortedByMatch.slice(0, 3);
+  const recommended = sortedByMatch.slice(0, 6);
+  const recent = withMatch.slice(0, 4); // keep chronological order
   const siwes = withMatch.filter((l) => l.is_siwes).slice(0, 3);
 
   const timeSince = (iso: string) => {
@@ -315,24 +321,35 @@ export default function HomeScreen() {
             <Text style={styles.greeting}>{greeting}, {firstName}!</Text>
             <Text style={styles.greetingSub}>Let's find your next opportunity</Text>
           </View>
-          <TouchableOpacity
-            style={styles.avatarWrap}
-            onPress={() => router.push('/(app)/(tabs)/profile')}
-          >
-            {avatarUrl ? (
-              <Image source={{ uri: avatarUrl }} style={styles.avatar} resizeMode="cover" />
-            ) : (
-              <LinearGradient
-                colors={[Colors.light.accentBlue, Colors.light.primaryBlue]}
-                style={styles.avatar}
-              >
-                <Text style={styles.avatarText}>
-                  {firstName.charAt(0).toUpperCase()}
-                </Text>
-              </LinearGradient>
-            )}
-            <View style={styles.notifBadge} />
-          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            {/* Bell / Notifications */}
+            <TouchableOpacity style={styles.bellWrap} onPress={openNotifModal}>
+              <Bell size={20} color={Colors.light.textDark} />
+              {unreadCount > 0 && (
+                <View style={styles.bellBadge}>
+                  <Text style={styles.bellBadgeText}>{unreadCount}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+            {/* Avatar */}
+            <TouchableOpacity
+              style={styles.avatarWrap}
+              onPress={() => router.push('/(app)/(tabs)/profile')}
+            >
+              {avatarUrl ? (
+                <Image source={{ uri: avatarUrl }} style={styles.avatar} resizeMode="cover" />
+              ) : (
+                <LinearGradient
+                  colors={[Colors.light.accentBlue, Colors.light.primaryBlue]}
+                  style={styles.avatar}
+                >
+                  <Text style={styles.avatarText}>
+                    {firstName.charAt(0).toUpperCase()}
+                  </Text>
+                </LinearGradient>
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* ——— SEARCH BAR ——— */}
@@ -355,6 +372,30 @@ export default function HomeScreen() {
             <SlidersHorizontal size={18} color="#FFFFFF" />
           </TouchableOpacity>
         </View>
+
+        {/* ——— ADMIN ANNOUNCEMENTS (active banners) ——— */}
+        {activeBanners.map((a) => (
+          <LinearGradient
+            key={a.id}
+            colors={['#1A3A6B', '#0D2348']}
+            style={styles.announcementBanner}
+          >
+            <View style={styles.announcementIconWrap}>
+              <Megaphone size={16} color="#1aaf6b" />
+            </View>
+            <View style={styles.announcementContent}>
+              <Text style={styles.announcementTitle}>{a.title}</Text>
+              <Text style={styles.announcementBody} numberOfLines={3}>{a.body}</Text>
+              <Text style={styles.announcementHint}>Tap ✕ to move to notifications</Text>
+            </View>
+            <TouchableOpacity
+              onPress={() => dismissAnnouncement(a.id)}
+              style={styles.announcementDismiss}
+            >
+              <X size={14} color="rgba(255,255,255,0.5)" />
+            </TouchableOpacity>
+          </LinearGradient>
+        ))}
 
         {/* ——— FEATURED BANNER ——— */}
         {featured.length > 0 && (
@@ -561,6 +602,94 @@ export default function HomeScreen() {
 
         <View style={{ height: 100 }} />
       </ScrollView>
+
+      {/* ——— NOTIFICATIONS MODAL ——— */}
+      <Modal
+        visible={showNotifModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={closeNotifModal}
+      >
+        <View style={styles.modalContainer}>
+          <Animated.View style={[
+            styles.modalContent,
+            {
+              transform: [{
+                translateY: modalAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [600, 0]
+                })
+              }]
+            }
+          ]}>
+            <View style={styles.modalHeader}>
+              <View>
+                <Text style={styles.modalTitle}>Notifications</Text>
+                {unreadCount > 0 && (
+                  <Text style={styles.modalSubtitle}>{unreadCount} unread announcements</Text>
+                )}
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                {unreadCount > 0 && (
+                  <TouchableOpacity style={styles.markAllReadBtn} onPress={markAllAsRead}>
+                    <CheckCheck size={14} color="#1aaf6b" />
+                    <Text style={styles.markAllReadText}>Mark all read</Text>
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity style={styles.closeModalBtn} onPress={closeNotifModal}>
+                  <X size={20} color={Colors.light.textDark} />
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {dismissedAnnouncements.length === 0 ? (
+              <View style={styles.notifEmptyContainer}>
+                <Bell size={48} color={Colors.light.textMuted} style={{ marginBottom: 12 }} />
+                <Text style={styles.notifEmptyTitle}>No notifications yet</Text>
+                <Text style={styles.notifEmptyText}>
+                  Announcements you dismiss will appear here for your history.
+                </Text>
+              </View>
+            ) : (
+              <ScrollView style={styles.notifScroll} showsVerticalScrollIndicator={false}>
+                {dismissedAnnouncements.map((a) => {
+                  const isRead = readIds.has(a.id);
+                  return (
+                    <View
+                      key={a.id}
+                      style={[styles.notifItem, !isRead && styles.notifItemUnread]}
+                    >
+                      <View style={[styles.notifIconWrap, !isRead && styles.notifIconWrapUnread]}>
+                        <Megaphone size={16} color={isRead ? '#94A3B8' : '#1aaf6b'} />
+                      </View>
+                      <View style={styles.notifBodyWrap}>
+                        <Text style={[styles.notifTitle, !isRead && styles.notifTitleUnread]}>
+                          {a.title}
+                        </Text>
+                        <Text style={styles.notifBody}>{a.body}</Text>
+                        <View style={styles.notifFooter}>
+                          <Text style={styles.notifTime}>
+                            {a.created_at ? new Date(a.created_at).toLocaleDateString('en-NG', { day: 'numeric', month: 'short' }) : 'Recently'}
+                          </Text>
+                          {!isRead && (
+                            <TouchableOpacity
+                              style={styles.notifActionBtn}
+                              onPress={() => markAsRead(a.id)}
+                            >
+                              <Text style={styles.notifActionText}>Mark read</Text>
+                            </TouchableOpacity>
+                          )}
+                        </View>
+                      </View>
+                    </View>
+                  );
+                })}
+                <View style={{ height: 40 }} />
+              </ScrollView>
+            )}
+          </Animated.View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -603,6 +732,155 @@ const styles = StyleSheet.create({
   filterBtn: {
     width: 50, height: 50, backgroundColor: Colors.light.primaryBlue,
     borderRadius: Radii.lg, justifyContent: 'center', alignItems: 'center',
+  },
+
+  // Announcement banners
+  announcementBanner: {
+    flexDirection: 'row', alignItems: 'center',
+    borderRadius: 16, marginHorizontal: 20, marginBottom: 16,
+    padding: 16, gap: 14,
+    borderWidth: 1, borderColor: 'rgba(26,175,107,0.3)',
+  },
+  announcementIconWrap: {
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: 'rgba(26,175,107,0.15)',
+    justifyContent: 'center', alignItems: 'center',
+  },
+  announcementContent: { flex: 1 },
+  announcementTitle: {
+    fontFamily: 'DMSans_700Bold', fontSize: 13,
+    color: '#FFFFFF', marginBottom: 2,
+  },
+  announcementBody: {
+    fontFamily: 'DMSans_400Regular', fontSize: 12,
+    color: 'rgba(255,255,255,0.7)', lineHeight: 18,
+  },
+  announcementHint: {
+    fontFamily: 'DMSans_400Regular', fontSize: 10,
+    color: 'rgba(255,255,255,0.4)', marginTop: 4,
+  },
+  announcementDismiss: {
+    padding: 6,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 16,
+  },
+  announcementDismissText: {
+    fontSize: 14, color: '#A16207', fontWeight: '700',
+  },
+
+  // Bell Badge Styles
+  bellWrap: {
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: Colors.light.inputBg,
+    justifyContent: 'center', alignItems: 'center',
+    position: 'relative',
+    borderWidth: 1.5, borderColor: Colors.light.inputBorder,
+  },
+  bellBadge: {
+    position: 'absolute', top: -2, right: -2,
+    backgroundColor: Colors.light.error,
+    borderRadius: 8, minWidth: 16, height: 16,
+    justifyContent: 'center', alignItems: 'center',
+    paddingHorizontal: 4,
+    borderWidth: 1.5, borderColor: '#FFFFFF',
+  },
+  bellBadgeText: {
+    fontFamily: 'DMSans_700Bold', fontSize: 9, color: '#FFFFFF',
+  },
+
+  // Notifications Modal Styles
+  modalContainer: {
+    flex: 1, backgroundColor: 'rgba(13,27,62,0.6)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    height: '80%', backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 28, borderTopRightRadius: 28,
+    paddingTop: 24,
+  },
+  modalHeader: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingHorizontal: 24, paddingBottom: 16,
+    borderBottomWidth: 1, borderBottomColor: '#F1F5F9',
+  },
+  modalTitle: {
+    fontFamily: 'DMSans_700Bold', fontSize: 20, color: Colors.light.textDark,
+  },
+  modalSubtitle: {
+    fontFamily: 'DMSans_400Regular', fontSize: 12, color: Colors.light.textMuted,
+    marginTop: 2,
+  },
+  markAllReadBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: 'rgba(26,175,107,0.1)',
+    paddingHorizontal: 12, paddingVertical: 6,
+    borderRadius: 8,
+  },
+  markAllReadText: {
+    fontFamily: 'DMSans_700Bold', fontSize: 12, color: '#1aaf6b',
+  },
+  closeModalBtn: {
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: '#F1F5F9',
+    justifyContent: 'center', alignItems: 'center',
+  },
+  notifScroll: {
+    flex: 1, paddingHorizontal: 24, paddingTop: 16,
+  },
+  notifItem: {
+    flexDirection: 'row', gap: 14, paddingVertical: 16,
+    borderBottomWidth: 1, borderBottomColor: '#F8FAFC',
+    borderRadius: 12, paddingHorizontal: 10, marginBottom: 4,
+  },
+  notifItemUnread: {
+    backgroundColor: 'rgba(26,175,107,0.03)',
+  },
+  notifIconWrap: {
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: '#F1F5F9',
+    justifyContent: 'center', alignItems: 'center',
+  },
+  notifIconWrapUnread: {
+    backgroundColor: 'rgba(26,175,107,0.12)',
+  },
+  notifBodyWrap: {
+    flex: 1,
+  },
+  notifTitle: {
+    fontFamily: 'DMSans_400Regular', fontSize: 14, color: '#64748B',
+    marginBottom: 4,
+  },
+  notifTitleUnread: {
+    fontFamily: 'DMSans_700Bold', fontSize: 14, color: Colors.light.textDark,
+  },
+  notifBody: {
+    fontFamily: 'DMSans_400Regular', fontSize: 13, color: '#64748B',
+    lineHeight: 18, marginBottom: 8,
+  },
+  notifFooter: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+  },
+  notifTime: {
+    fontFamily: 'DMSans_400Regular', fontSize: 11, color: '#94A3B8',
+  },
+  notifActionBtn: {
+    borderWidth: 1, borderColor: '#CBD5E1',
+    borderRadius: 6, paddingHorizontal: 10, paddingVertical: 4,
+  },
+  notifActionText: {
+    fontFamily: 'DMSans_600SemiBold', fontSize: 11, color: '#475569',
+  },
+  notifEmptyContainer: {
+    flex: 1, justifyContent: 'center', alignItems: 'center',
+    paddingHorizontal: 40, paddingBottom: 60,
+  },
+  notifEmptyTitle: {
+    fontFamily: 'DMSans_600SemiBold', fontSize: 16, color: Colors.light.textDark,
+    marginBottom: 6,
+  },
+  notifEmptyText: {
+    fontFamily: 'DMSans_400Regular', fontSize: 13, color: Colors.light.textMuted,
+    textAlign: 'center', lineHeight: 18,
   },
 
   // Sections

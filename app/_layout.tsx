@@ -17,6 +17,9 @@ import * as SplashScreen from "expo-splash-screen";
 import { supabase } from "@/lib/supabase";
 import { useAuthStore } from "@/store/authStore";
 
+import ToastNotification from "@/components/ToastNotification";
+import GlobalConfirmModal from "@/components/GlobalConfirmModal";
+
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
@@ -97,6 +100,9 @@ export default function RootLayout() {
       // User is inside the app but has no valid session → sign-in
       router.replace("/(auth)/sign-in");
     } else if (session && inAuthGroup) {
+      // Don't auto-redirect if we are on the OTP screen, as it handles its own profile setup and sign-out
+      if (segments[1] === "otp") return;
+      
       // Authenticated user is on an auth page → push to app
       router.replace("/(app)/(tabs)/home");
     }
@@ -119,6 +125,8 @@ export default function RootLayout() {
         <Stack.Screen name="(app)" />
       </Stack>
       <StatusBar style="auto" />
+      <ToastNotification />
+      <GlobalConfirmModal />
     </GestureHandlerRootView>
   );
 }

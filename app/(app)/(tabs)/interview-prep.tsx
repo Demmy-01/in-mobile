@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, ActivityIndicator, Alert, Animated, Dimensions,
+  TextInput, ActivityIndicator, Animated, Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -16,6 +16,7 @@ import {
   CheckCircle2, AlertTriangle, Lightbulb, RotateCcw,
   Layers, Rocket, Sparkles, Users,
 } from 'lucide-react-native';
+import { useToastStore } from '@/store/toastStore';
 
 const C = Colors.light;
 const { width: SW } = Dimensions.get('window');
@@ -49,6 +50,7 @@ const GRADE_COLOR: Record<string, string> = {
 };
 
 export default function InterviewPrepScreen() {
+  const showToast = useToastStore((state) => state.showToast);
   const [mode, setMode] = useState<Mode>('oral');
   const [phase, setPhase] = useState<Phase>('role');
   const [role, setRole] = useState('');
@@ -75,7 +77,7 @@ export default function InterviewPrepScreen() {
   };
 
   const handleStart = async () => {
-    if (!role.trim()) { Alert.alert('Required', 'Please enter the role you are preparing for.'); return; }
+    if (!role.trim()) { showToast('Please enter the role you are preparing for.', 'error', 'Required'); return; }
     setPhase('loading_q');
     setLoadingMsg('Generating smart questions for ' + role.trim() + '…');
     try {
@@ -85,7 +87,7 @@ export default function InterviewPrepScreen() {
       setCurrentQ(0);
       setPhase('interview');
     } catch (e: any) {
-      Alert.alert('Error', e?.message ?? 'Could not generate questions. Try again.');
+      showToast(e?.message ?? 'Could not generate questions. Try again.', 'error', 'Error');
       setPhase('role');
     }
   };
@@ -108,7 +110,7 @@ export default function InterviewPrepScreen() {
       setGrade(result);
       setPhase('result');
     } catch (e: any) {
-      Alert.alert('Error', e?.message ?? 'Grading failed. Please try again.');
+      showToast(e?.message ?? 'Grading failed. Please try again.', 'error', 'Error');
       setPhase('interview');
     }
   };

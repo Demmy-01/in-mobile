@@ -10,18 +10,19 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
-  Alert,
 } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { supabase } from "@/lib/supabase";
 import { useAuthStore } from "@/store/authStore";
 import { Mail, Key, Eye, EyeOff } from "lucide-react-native";
 import Svg, { Path, G, Rect, ClipPath, Defs } from "react-native-svg";
+import { useToastStore } from "@/store/toastStore";
 
 type Tab = "sign-in" | "sign-up";
 
 export default function SignInScreen() {
   const router = useRouter();
+  const showToast = useToastStore((state) => state.showToast);
   const params = useLocalSearchParams<{ email?: string; message?: string }>();
   const { setSession, fetchProfile } = useAuthStore();
   const [activeTab, setActiveTab] = useState<Tab>("sign-in");
@@ -34,17 +35,34 @@ export default function SignInScreen() {
   // Show message if coming from OTP redirect
   useEffect(() => {
     if (params.message) {
-      Alert.alert("Email Verified", params.message);
+      showToast(params.message, 'success', 'Email Verified');
     }
   }, [params.message]);
 
   const handleSignIn = async () => {
     if (!email.trim() || !password) {
-      Alert.alert("Validation Error", "Please enter email and password");
+      showToast('Please enter email and password', 'error', 'Validation Error');
       return;
     }
     setIsLoading(true);
     console.log("[SignIn] Attempting login for:", email.trim());
+
+    // Block organisation accounts from signing in as students
+    const { data: orgProfile } = await supabase
+      .from('organisation_profiles')
+      .select('id')
+      .eq('email', email.trim())
+      .maybeSingle();
+
+    if (orgProfile) {
+      setIsLoading(false);
+      showToast(
+        'This email is registered as an Organisation account. Please use the Organisation Portal to sign in.',
+        'error',
+        'Wrong Portal'
+      );
+      return;
+    }
 
     const { error } = await supabase.auth.signInWithPassword({
       email: email.trim(),
@@ -54,7 +72,7 @@ export default function SignInScreen() {
     if (error) {
       setIsLoading(false);
       console.error("[SignIn] Authentication failed:", error.message);
-      Alert.alert("Sign In Failed", error.message);
+      showToast(error.message, 'error', 'Sign In Failed');
       return;
     }
 
@@ -90,10 +108,7 @@ export default function SignInScreen() {
     } catch (err: any) {
       setIsLoading(false);
       console.error("[SignIn] Session setup error:", err.message);
-      Alert.alert(
-        "Session Error",
-        "Could not load your profile. Please try again.",
-      );
+      showToast('Could not load your profile. Please try again.', 'error', 'Session Error');
     }
   };
 
@@ -232,9 +247,18 @@ export default function SignInScreen() {
                 disabled={isGoogleLoading}
                 onPress={async () => {
                   setIsGoogleLoading(true);
-                  const { error } = await signInWithGoogle();
+                  const { error, session } = await signInWithGoogle();
                   setIsGoogleLoading(false);
-                  if (error) Alert.alert("Google Sign-In Failed", error);
+                  if (error) {
+                    showToast(error, 'error', 'Google Sign-In Failed');
+                  } else {
+                    if (session) {
+                      setSession(session);
+                      await fetchProfile();
+                    }
+                    showToast('Successfully authenticated with Google!', 'success', 'Welcome! 🎉');
+                    router.replace('/(app)/(tabs)/home');
+                  }
                 }}
               >
                 <Svg width={22} height={22} viewBox="0 0 48 48">

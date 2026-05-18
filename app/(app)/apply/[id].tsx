@@ -8,7 +8,6 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
-  Alert,
   ActivityIndicator,
   Image,
 } from 'react-native';
@@ -22,6 +21,7 @@ import { Colors } from '@/constants/Colors';
 import { Typography, Radii } from '@/constants/theme';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuthStore } from '@/store/authStore';
+import { useToastStore } from '@/store/toastStore';
 import { supabase } from '@/lib/supabase';
 import { formatNairaRange } from '@/constants/AppData';
 import * as DocumentPicker from 'expo-document-picker';
@@ -56,6 +56,7 @@ export default function ApplyScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { profile } = useAuthStore();
+  const showToast = useToastStore((state) => state.showToast);
 
   const [listing, setListing] = useState<Listing | null>(null);
   const [isLoadingListing, setIsLoadingListing] = useState(true);
@@ -136,7 +137,7 @@ export default function ApplyScreen() {
       setUploadedCV({ name: file.name, url: urlData.publicUrl });
       setCvMode('upload');
     } catch (err: any) {
-      Alert.alert('Upload Failed', err.message || 'Could not upload file. Please try again.');
+      showToast(err.message || 'Could not upload file. Please try again.', 'error', 'Upload Failed');
     } finally {
       setIsUploadingFile(false);
     }
@@ -167,14 +168,11 @@ export default function ApplyScreen() {
     }
 
     if (error || !data) {
-      Alert.alert(
-        'No CV Found',
-        "You haven't generated a CV yet. Go to the CV Builder tab to create one.",
-        [
-          { text: 'Go to CV Builder', onPress: () => router.push('/(app)/(tabs)/cv-builder') },
-          { text: 'Cancel', style: 'cancel' },
-        ]
-      );
+      showToast("You haven't generated a CV yet. Go to the CV Builder tab to create one.", 'info', 'No CV Found');
+      // Navigate after toast
+      setTimeout(() => {
+        router.push('/(app)/(tabs)/cv-builder');
+      }, 1000);
       return;
     }
 
@@ -190,15 +188,15 @@ export default function ApplyScreen() {
   // --- Submit Application ---
   const handleApply = async () => {
     if (!coverLetter.trim()) {
-      Alert.alert('Missing Field', 'Please provide a cover letter or note to the employer.');
+      showToast('Please provide a cover letter or note to the employer.', 'error', 'Missing Field');
       return;
     }
     if (!profile?.id || !id) {
-      Alert.alert('Error', 'You must be signed in to apply.');
+      showToast('You must be signed in to apply.', 'error', 'Error');
       return;
     }
     if (alreadyApplied) {
-      Alert.alert('Already Applied', 'You have already submitted an application for this position.');
+      showToast('You have already submitted an application for this position.', 'error', 'Already Applied');
       return;
     }
 
@@ -220,17 +218,13 @@ export default function ApplyScreen() {
     setIsSubmitting(false);
 
     if (error) {
-      Alert.alert('Submission Failed', error.message);
+      showToast(error.message, 'error', 'Submission Failed');
     } else {
       setAlreadyApplied(true);
-      Alert.alert(
-        'Application Submitted! 🎉',
-        'Your application has been successfully sent to the employer.',
-        [
-          { text: 'View Applications', onPress: () => router.replace('/(app)/(tabs)/applications') },
-          { text: 'Back to Home', onPress: () => router.replace('/(app)/(tabs)/home') },
-        ]
-      );
+      showToast('Your application has been successfully sent to the employer.', 'success', 'Application Submitted! 🎉');
+      setTimeout(() => {
+        router.replace('/(app)/(tabs)/applications');
+      }, 1500);
     }
   };
 
