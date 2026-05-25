@@ -14,7 +14,7 @@ import { useAuthStore } from '@/store/authStore';
 import {
   INTERNSHIP_CATEGORIES, formatNairaRange, getGreeting,
 } from '@/constants/AppData';
-import { Search, SlidersHorizontal, MapPin, Clock, Bookmark, SearchX, Bell, Megaphone, X, CheckCheck } from 'lucide-react-native';
+import { Search, SlidersHorizontal, MapPin, Clock, Bookmark, SearchX, Bell, Megaphone, X, CheckCheck, Briefcase } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
 import { evaluateInternshipMatches } from '@/lib/nvidia';
 import { computeLocalMatch } from '@/lib/matchScore';
@@ -55,6 +55,16 @@ interface Listing {
   } | null;
 }
 
+interface StudentNotification {
+  id: string;
+  type: string;
+  title: string;
+  body: string;
+  listing_id: string | null;
+  read: boolean;
+  created_at: string;
+}
+
 
 const GRADIENTS: [string, string][] = [
   ['#1A3A6B', '#2D6BE4'],
@@ -83,10 +93,15 @@ export default function HomeScreen() {
   const [showNotifModal, setShowNotifModal] = useState(false);
   const modalAnim = useRef(new Animated.Value(0)).current;
 
+  // Student-specific in-app notifications (new listing alerts)
+  const [studentNotifs, setStudentNotifs] = useState<StudentNotification[]>([]);
+
   // Derived
   const activeBanners = announcements.filter(a => !dismissedIds.has(a.id));
   const dismissedAnnouncements = announcements.filter(a => dismissedIds.has(a.id));
-  const unreadCount = dismissedAnnouncements.filter(a => !readIds.has(a.id)).length;
+  const unreadAnnouncementCount = dismissedAnnouncements.filter(a => !readIds.has(a.id)).length;
+  const unreadStudentNotifCount = studentNotifs.filter(n => !n.read).length;
+  const unreadCount = unreadAnnouncementCount + unreadStudentNotifCount;
 
   // Load persisted sets on mount
   useEffect(() => {
@@ -120,6 +135,34 @@ export default function HomeScreen() {
     dismissedAnnouncements.forEach(a => next.add(a.id));
     setReadIds(next);
     await saveSet(READ_KEY, next);
+  };
+
+  // Student notification helpers
+  const fetchStudentNotifs = useCallback(async () => {
+    if (!profile?.id) return;
+    try {
+      const { data } = await supabase
+        .from('student_notifications')
+        .select('id, type, title, body, listing_id, read, created_at')
+        .eq('student_id', profile.id)
+        .order('created_at', { ascending: false })
+        .limit(30);
+      if (data) setStudentNotifs(data as StudentNotification[]);
+    } catch {
+      // table may not exist yet — silently ignore
+    }
+  }, [profile?.id]);
+
+  const markStudentNotifRead = async (id: string) => {
+    setStudentNotifs(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+    await supabase.from('student_notifications').update({ read: true }).eq('id', id);
+  };
+
+  const markAllStudentNotifsRead = async () => {
+    const unreadIds = studentNotifs.filter(n => !n.read).map(n => n.id);
+    if (unreadIds.length === 0) return;
+    setStudentNotifs(prev => prev.map(n => ({ ...n, read: true })));
+    await supabase.from('student_notifications').update({ read: true }).in('id', unreadIds);
   };
 
   const firstName = profile?.first_name ?? 'Student';
@@ -235,25 +278,40 @@ export default function HomeScreen() {
     load();
 
     // Subscribe to announcements realtime changes
-    const channel = supabase
+    const announcementsChannel = supabase
       .channel('announcements_realtime')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'announcements' },
-        () => {
-          fetchAnnouncements();
-        }
+        () => { fetchAnnouncements(); }
       )
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      supabase.removeChannel(announcementsChannel);
     };
   }, [fetchListings, fetchSaved, fetchAnnouncements]);
 
+  // Fetch student notifications once profile is ready; subscribe to realtime inserts
+  useEffect(() => {
+    if (!profile?.id) return;
+    fetchStudentNotifs();
+
+    const channel = supabase
+      .channel('student-notifs-home')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'student_notifications', filter: `student_id=eq.${profile.id}` },
+        () => fetchStudentNotifs()
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [profile?.id, fetchStudentNotifs]);
+
   const onRefresh = async () => {
     setRefreshing(true);
-    await Promise.all([fetchListings(), fetchSaved(), fetchAnnouncements()]);
+    await Promise.all([fetchListings(), fetchSaved(), fetchAnnouncements(), fetchStudentNotifs()]);
     setRefreshing(false);
   };
 
@@ -626,12 +684,12 @@ export default function HomeScreen() {
               <View>
                 <Text style={styles.modalTitle}>Notifications</Text>
                 {unreadCount > 0 && (
-                  <Text style={styles.modalSubtitle}>{unreadCount} unread announcements</Text>
+                  <Text style={styles.modalSubtitle}>{unreadCount} unread</Text>
                 )}
               </View>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
                 {unreadCount > 0 && (
-                  <TouchableOpacity style={styles.markAllReadBtn} onPress={markAllAsRead}>
+                  <TouchableOpacity style={styles.markAllReadBtn} onPress={() => { markAllAsRead(); markAllStudentNotifsRead(); }}>
                     <CheckCheck size={14} color="#1aaf6b" />
                     <Text style={styles.markAllReadText}>Mark all read</Text>
                   </TouchableOpacity>
@@ -642,48 +700,101 @@ export default function HomeScreen() {
               </View>
             </View>
 
-            {dismissedAnnouncements.length === 0 ? (
+            {dismissedAnnouncements.length === 0 && studentNotifs.length === 0 ? (
               <View style={styles.notifEmptyContainer}>
                 <Bell size={48} color={Colors.light.textMuted} style={{ marginBottom: 12 }} />
                 <Text style={styles.notifEmptyTitle}>No notifications yet</Text>
                 <Text style={styles.notifEmptyText}>
-                  Announcements you dismiss will appear here for your history.
+                  New internship alerts and announcements will appear here.
                 </Text>
               </View>
             ) : (
               <ScrollView style={styles.notifScroll} showsVerticalScrollIndicator={false}>
-                {dismissedAnnouncements.map((a) => {
-                  const isRead = readIds.has(a.id);
-                  return (
-                    <View
-                      key={a.id}
-                      style={[styles.notifItem, !isRead && styles.notifItemUnread]}
-                    >
-                      <View style={[styles.notifIconWrap, !isRead && styles.notifIconWrapUnread]}>
-                        <Megaphone size={16} color={isRead ? '#94A3B8' : '#1aaf6b'} />
-                      </View>
-                      <View style={styles.notifBodyWrap}>
-                        <Text style={[styles.notifTitle, !isRead && styles.notifTitleUnread]}>
-                          {a.title}
-                        </Text>
-                        <Text style={styles.notifBody}>{a.body}</Text>
-                        <View style={styles.notifFooter}>
-                          <Text style={styles.notifTime}>
-                            {a.created_at ? new Date(a.created_at).toLocaleDateString('en-NG', { day: 'numeric', month: 'short' }) : 'Recently'}
-                          </Text>
-                          {!isRead && (
-                            <TouchableOpacity
-                              style={styles.notifActionBtn}
-                              onPress={() => markAsRead(a.id)}
-                            >
-                              <Text style={styles.notifActionText}>Mark read</Text>
-                            </TouchableOpacity>
-                          )}
-                        </View>
-                      </View>
+
+                {/* ── New Listing Alerts ── */}
+                {studentNotifs.length > 0 && (
+                  <>
+                    <View style={styles.notifSectionHeader}>
+                      <Text style={styles.notifSectionLabel}>NEW LISTINGS</Text>
                     </View>
-                  );
-                })}
+                    {studentNotifs.map((n) => {
+                      const isRead = n.read;
+                      return (
+                        <View
+                          key={n.id}
+                          style={[styles.notifItem, !isRead && styles.notifItemUnread]}
+                        >
+                          <View style={[styles.notifIconWrap, !isRead && { backgroundColor: 'rgba(59,107,212,0.15)' }]}>
+                            <Briefcase size={16} color={isRead ? '#94A3B8' : '#3b6fd4'} />
+                          </View>
+                          <View style={styles.notifBodyWrap}>
+                            <Text style={[styles.notifTitle, !isRead && styles.notifTitleUnread]}>
+                              {n.title}
+                            </Text>
+                            <Text style={styles.notifBody}>{n.body}</Text>
+                            <View style={styles.notifFooter}>
+                              <Text style={styles.notifTime}>
+                                {n.created_at ? new Date(n.created_at).toLocaleDateString('en-NG', { day: 'numeric', month: 'short' }) : 'Recently'}
+                              </Text>
+                              {!isRead && (
+                                <TouchableOpacity
+                                  style={styles.notifActionBtn}
+                                  onPress={() => markStudentNotifRead(n.id)}
+                                >
+                                  <Text style={styles.notifActionText}>Mark read</Text>
+                                </TouchableOpacity>
+                              )}
+                            </View>
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </>
+                )}
+
+                {/* ── Admin Announcements ── */}
+                {dismissedAnnouncements.length > 0 && (
+                  <>
+                    {studentNotifs.length > 0 && (
+                      <View style={styles.notifSectionHeader}>
+                        <Text style={styles.notifSectionLabel}>ANNOUNCEMENTS</Text>
+                      </View>
+                    )}
+                    {dismissedAnnouncements.map((a) => {
+                      const isRead = readIds.has(a.id);
+                      return (
+                        <View
+                          key={a.id}
+                          style={[styles.notifItem, !isRead && styles.notifItemUnread]}
+                        >
+                          <View style={[styles.notifIconWrap, !isRead && styles.notifIconWrapUnread]}>
+                            <Megaphone size={16} color={isRead ? '#94A3B8' : '#1aaf6b'} />
+                          </View>
+                          <View style={styles.notifBodyWrap}>
+                            <Text style={[styles.notifTitle, !isRead && styles.notifTitleUnread]}>
+                              {a.title}
+                            </Text>
+                            <Text style={styles.notifBody}>{a.body}</Text>
+                            <View style={styles.notifFooter}>
+                              <Text style={styles.notifTime}>
+                                {a.created_at ? new Date(a.created_at).toLocaleDateString('en-NG', { day: 'numeric', month: 'short' }) : 'Recently'}
+                              </Text>
+                              {!isRead && (
+                                <TouchableOpacity
+                                  style={styles.notifActionBtn}
+                                  onPress={() => markAsRead(a.id)}
+                                >
+                                  <Text style={styles.notifActionText}>Mark read</Text>
+                                </TouchableOpacity>
+                              )}
+                            </View>
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </>
+                )}
+
                 <View style={{ height: 40 }} />
               </ScrollView>
             )}
@@ -881,6 +992,13 @@ const styles = StyleSheet.create({
   notifEmptyText: {
     fontFamily: 'DMSans_400Regular', fontSize: 13, color: Colors.light.textMuted,
     textAlign: 'center', lineHeight: 18,
+  },
+  notifSectionHeader: {
+    paddingHorizontal: 10, paddingVertical: 8, marginTop: 8,
+  },
+  notifSectionLabel: {
+    fontFamily: 'DMSans_700Bold', fontSize: 10, color: Colors.light.textMuted,
+    letterSpacing: 1.2,
   },
 
   // Sections
